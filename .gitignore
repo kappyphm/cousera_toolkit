@@ -1,0 +1,22 @@
+# Original vendor build — reference only, never commit
+prototype/
+
+# Deps / build outputs
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+
+# Logs / OS / editor
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Env / secrets (API keys must never be committed)
+.env
+.env.*
+!.env.example
