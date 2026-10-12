@@ -1,5 +1,7 @@
-// Content entry — message router (v1: video/reading + discussing).
+// Content entry — message router (v1: video/reading + discussing; v2: submit assignment + request grading).
 import { createLogger } from "../shared/logger.ts";
+import { handlePeerGradedAssignment } from "./auto-submit-assignment.ts";
+import { requestGradingByPeer } from "./request-grading-by-peer.ts";
 import { handleDiscussionPrompt } from "./skip-discussing.ts";
 import { resolveWeekMaterial } from "./skip-video-reading.ts";
 
@@ -24,6 +26,18 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     handleDiscussionPrompt(m.waitingTimeSec ?? 20, m.content)
       .then(() => sendResponse({ ok: true }))
       .catch((e: unknown) => fail("skip-discussing", e, sendResponse));
+    return true;
+  }
+  if (action === "submit-assignment") {
+    handlePeerGradedAssignment()
+      .then(() => sendResponse({ ok: true }))
+      .catch((e: unknown) => fail("submit-assignment", e, sendResponse));
+    return true;
+  }
+  if (action === "request-grading-by-peer") {
+    requestGradingByPeer()
+      .then(() => sendResponse({ ok: true }))
+      .catch((e: unknown) => fail("request-grading-by-peer", e, sendResponse));
     return true;
   }
   sendResponse({ ok: false, error: `unknown action ${String(action)}` });

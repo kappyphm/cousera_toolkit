@@ -175,6 +175,49 @@ export function csrfToken(): string | null {
   return m?.[1] ?? null;
 }
 
+export interface CourseMeta {
+  course_id: string;
+  item_id: string;
+  open_course_slug?: string;
+  [k: string]: unknown;
+}
+
+/**
+ * 1:1 of prototype `fg as getMetadata` @ 356668.
+ * Selector + attr decoded from `we` table: cbjFe = page-header-wrapper link,
+ * we(227) = "data-click-value". JSON.parse throws on missing attr (same as
+ * prototype — no silent default).
+ */
+export function getMetadata(): CourseMeta {
+  const el = document.querySelector(
+    '[data-testid="page-header-wrapper"] a[data-track-app="open_course_home"]'
+  );
+  const raw = el?.getAttribute("data-click-value") ?? "";
+  if (!raw) {
+    throw new CloneError("data-click-value attr missing on course-home link", {
+      module: "coursera-shared",
+      step: "getMetadata",
+      href: location.href
+    });
+  }
+  let parsed: CourseMeta;
+  try {
+    parsed = JSON.parse(raw) as CourseMeta;
+  } catch (e) {
+    throw new CloneError(`data-click-value JSON parse failed: ${(e as Error).message}`, {
+      module: "coursera-shared",
+      step: "getMetadata",
+      preview: raw.slice(0, 200)
+    });
+  }
+  log.debug("getMetadata", "parsed", {
+    courseId: parsed.course_id,
+    itemId: parsed.item_id,
+    slug: parsed.open_course_slug
+  });
+  return parsed;
+}
+
 /** 1:1 CSRF header builder from prototype `l(v)`. */
 export function csrfHeaders(extra: Record<string, string> = {}): Record<string, string> {
   const csrf = csrfToken();
