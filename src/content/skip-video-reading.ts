@@ -300,7 +300,7 @@ export async function resolveWeekMaterial(
       else log.debug("runBranch", `skip type=${String(type)}`, { itemId: w.id });
     } catch (e) {
       log.error("runBranch", `item=${w.id} type=${String(type)} failed`, {
-        courseId, itemId: w.id
+        courseId, itemId: w.id, error: (e as Error).message
       });
       throw e;
     }

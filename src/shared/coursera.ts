@@ -194,7 +194,7 @@ export async function postJson<T = unknown>(
   body: unknown,
   headers: Record<string, string>,
   ctx: Record<string, unknown> = {}
-): Promise<{ res: Response; json: T }> {
+): Promise<{ res: Response; json: T | null }> {
   const log2 = createLogger(module);
   const started = performance.now();
   log2.info(step, `POST ${url}`, ctx);
@@ -218,7 +218,24 @@ export async function postJson<T = unknown>(
       ...ctx
     });
   }
-  const json = (await res.json()) as T;
+  // Prototype `u()` for CompletedItems (and siblings) ignores the response
+  // body entirely — Coursera answers some POSTs with an HTML page (2xx).
+  // Tolerate non-JSON body: log preview, return null, never throw on parse.
+  const text = await res.text();
+  let json: T | null = null;
+  if (text) {
+    try {
+      json = JSON.parse(text) as T;
+    } catch {
+      log2.info(step, `POST ok status=${res.status} non-JSON body (ignored like prototype)`, {
+        ...ctx,
+        status: res.status,
+        ms: Math.round(performance.now() - started),
+        bodyPreview: text.slice(0, 300)
+      });
+      return { res, json };
+    }
+  }
   log2.info(step, `POST ok status=${res.status}`, {
     ...ctx,
     status: res.status,
