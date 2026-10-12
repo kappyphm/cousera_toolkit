@@ -1,7 +1,10 @@
-# v2.05 — AI Text Submit (Question → Gemini SDK → Fill)
+# v2.05 — AI Answer Fill (Question → Gemini SDK → Fill, MANUAL submit)
 
-Scope: auto fill + submit cho AI-graded **text form** (vd "Reflecting on the AI-Graded Feedback").
-Pipeline: extract prompt → Gemini (`@google/genai`, model `gemini-2.5-flash`) → fill → save draft → honor → submit.
+Scope: fill đáp án AI cho AI-graded **text form** (vd "Reflecting on the AI-Graded Feedback").
+Pipeline: extract prompt → Gemini (`@google/genai`, model `gemini-2.5-flash`) → fill + verify.
+SUBMIT LÀ THỦ CÔNG (quyết định user 2026-10-12): sau khi fill xong user tự review
+nội dung rồi Save draft → honor → Submit tay. Extension không bấm submit,
+không confirm dialog, không chain d2 (d2 cần submissionId của bài đã nộp).
 
 ## P0 findings (verified 2026-10-12)
 
@@ -75,9 +78,31 @@ if (!r) throw new Error("Gemini API key is missing in storage.");   // Cn(281)
 - Panel gốc: input `id="gemini-api"` placeholder "Enter Gemini API" ("Gemini API:"),
   lưu `chrome.storage.local.set({geminiAPI})`; key `model` riêng.
 
-## Pipeline (đã duyệt)
+## Pipeline (fill-only, quyết định 2026-10-12)
 
-extract (cover click → prompt + rubric theo responseId) → Gemini SDK → fill (reuse
-fillEditor/fillPlainInput) → save draft → honor → poll submit enabled → submit →
-confirm (`dialog-submit-button`) → chain `d2()` nếu disclose AI Grading.
-Key thiếu → CloneError, không gọi API.
+extract (cover click → prompt + rubric theo responseId) → Gemini SDK → fill
+(reuse fillEditor/fillPlainInput, Slate-aware qua `beforeinput` + read-back
+verify) → DỪNG, log "REVIEW the content, then submit MANUALLY".
+Key thiếu → CloneError, không gọi API. Fill verify rỗng → CloneError, không
+bao giờ để user nộp bài rỗng (bài học từ sự cố submit-empty: DOM hiện chữ
+nhưng Slate/React state rỗng — xem §6).
+
+## 6. Sự cố submit-empty (log thực tế 2026-10-12, trang Reflecting)
+
+Triệu chứng: `fill part #1 filled len=1725` ok, editor HIỆN chữ, nhưng
+`submit-button stayed disabled after fill+honor` (poll 30s) — lần chạy trước
+nữa còn nộp thành bài rỗng kèm cảnh báo "empty answer" của Coursera.
+
+Root cause: part `RichTextQuestion` đi đường Slate; `execCommand("insertHTML")`
+chỉ mutate DOM (nhìn thấy chữ) mà không qua pipeline `beforeinput` của
+Slate-react → value nội bộ rỗng → app state rỗng → Submit bị gate + payload rỗng.
+
+Fix:
+- `fillEditor`: insert từng paragraph qua synthetic `beforeinput`
+  (`insertText`/`insertParagraph`) để Slate commit value; `execCommand` chỉ còn
+  là fallback cho contenteditable thường; cuối cùng read-back `innerText`,
+  rỗng → return false → caller throw (không bao giờ pass fill rỗng).
+- `fillPlainInput`: gán qua NATIVE value setter + bubbled `input` event để
+  React controlled input fire `onChange` thật; read-back `el.value`.
+- Flow rút gọn fill-only: không auto-submit nên thảm họa nộp-rỗng không thể
+  tái diễn từ phía extension; user review tay trước khi nộp.

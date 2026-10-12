@@ -52,8 +52,11 @@ function Popup() {
       </button>
       <br /><br />
       <button onClick={() => void run("submit-text-assignment")}>
-        AI text submit (Gemini)
+        Fill answer (Gemini)
       </button>
+      <p style={{ margin: "4px 0 0", color: "#555", fontSize: 12 }}>
+        Fill-only: review content, then Save draft → honor → Submit by hand.
+      </p>
       <div style={{ marginTop: 12 }}>
         <label htmlFor="gemini-api">Gemini API: </label>
         <input
