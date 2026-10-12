@@ -1,6 +1,9 @@
 # Original vendor build — reference only, never commit
 prototype/
 
+# Saved web pages for analysis (large, local reference only)
+analysis/v2/coursera resource/
+
 # Deps / build outputs
 node_modules/
 dist/

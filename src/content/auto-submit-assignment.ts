@@ -12,7 +12,7 @@ import { requestGradingByPeer } from "./request-grading-by-peer.ts";
 const log = createLogger("auto-submit-assignment");
 
 /** 1:1 of prototype `hD` @ 734205 — true when page discloses AI Grading. */
-async function hasAiGrading(): Promise<boolean> {
+export async function hasAiGrading(): Promise<boolean> {
   const el = await waitForSelector(".disclosure-header", 1000).catch(() => null);
   const hit = el?.textContent?.includes("AI Grading") ?? false;
   log.debug("hD", `AI Grading disclosure=${hit}`);

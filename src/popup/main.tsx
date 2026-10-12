@@ -3,6 +3,20 @@ import { createRoot } from "react-dom/client";
 
 function Popup() {
   const [status, setStatus] = React.useState("idle");
+  // Prototype panel: input id="gemini-api" placeholder "Enter Gemini API"
+  // ("Gemini API:"), persisted to chrome.storage.local {geminiAPI}; model in {model}.
+  const [geminiKey, setGeminiKey] = React.useState("");
+  const [model, setModel] = React.useState("gemini-2.5-flash");
+  React.useEffect(() => {
+    void chrome.storage.local.get(["geminiAPI", "model"]).then((s) => {
+      if (typeof s?.geminiAPI === "string") setGeminiKey(s.geminiAPI);
+      if (typeof s?.model === "string") setModel(s.model);
+    });
+  }, []);
+  const saveGemini = async () => {
+    await chrome.storage.local.set({ geminiAPI: geminiKey, model });
+    setStatus("gemini: key+model saved");
+  };
   const run = async (action: string) => {
     setStatus(`${action}…`);
     try {
@@ -36,6 +50,30 @@ function Popup() {
       <button onClick={() => void run("request-grading-by-peer")}>
         Request peer grading
       </button>
+      <br /><br />
+      <button onClick={() => void run("submit-text-assignment")}>
+        AI text submit (Gemini)
+      </button>
+      <div style={{ marginTop: 12 }}>
+        <label htmlFor="gemini-api">Gemini API: </label>
+        <input
+          id="gemini-api"
+          type="text"
+          placeholder="Enter Gemini API"
+          value={geminiKey}
+          onChange={(e) => setGeminiKey(e.target.value)}
+          style={{ width: "100%", margin: "4px 0" }}
+        />
+        <label htmlFor="gemini-model">Model: </label>
+        <input
+          id="gemini-model"
+          type="text"
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+          style={{ width: "100%", margin: "4px 0" }}
+        />
+        <button onClick={() => void saveGemini()}>Save key</button>
+      </div>
       <p>Status: {status}</p>
     </main>
   );
