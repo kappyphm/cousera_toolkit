@@ -54,13 +54,13 @@ Background tail export (verbatim, obfuscated identifiers):
 ## Roadmap -> docs
 
 - **v1:** skip video/reading, skip discussing
-  - `v1/01-skip-video-reading.md` — `dD as resolveWeekMaterial`
-  - `v1/02-skip-discussing.md` — `vD as handleDiscussionPrompt`
+  - `v1/01-skip-video-reading.md` — `dD as resolveWeekMaterial` (decoder `an`, base 290)
+  - `v1/02-skip-discussing.md` — `vD as handleDiscussionPrompt` (decoder `ke`, base 120)
 - **v2:** auto submit, auto grade, disable AI grading, auto peer review, shareable link
-  - `v2/01-auto-submit-quiz.md`
-  - `v2/02-auto-grade-disable-ai-grading.md`
-  - `v2/03-auto-peer-review.md`
-  - `v2/04-shareable-link.md`
+  - `v2/01-auto-submit-quiz.md` — `x2 as handleAutoquiz` @ 705766 (decoder `sn`, base 345)
+  - `v2/02-auto-grade-disable-ai-grading.md` — `d2 as requestGradingByPeer` @ 752402 (decoder `ln`, base 101)
+  - `v2/03-auto-peer-review.md` — `mD` @ 738051, `_D` @ 761766, `Pd` @ 757644 (decoders `Mn`/`Sn`/`Ke`)
+  - `v2/04-shareable-link.md` — `yy` @ ~167960 (decoder `Re`, base 492) + background `i` (base 377)
 - **v3:** AI auto quiz, bypass locked browser
   - `v3/01-ai-auto-quiz.md`
   - `v3/02-bypass-locked-browser.md`

@@ -1,73 +1,75 @@
-# v2.02 — Auto Grade / Disable AI Grading (`d2 as requestGradingByPeer` + rubric helpers)
+# v2.02 — Auto Grade / Disable AI Grading (`d2 as requestGradingByPeer`)
 
-Source: `assets/chunk-674d105d.js` `d2` (~752402), rubric helpers `tC/rC` (~328472+). There is **no** standalone `autoGrade` or `disableAiGrading` flag in the bundle; the UI's "Disable AI" button maps to `d2`, i.e. forcing a human peer-grading round via GraphQL.
+Source: `prototype/assets/chunk-674d105d.js` `d2` @ 752402.
+Decoder: `ln` (table `ua`, base 101, rotation (ua, 881730)).
+Rubric helpers: `tC` @ 332273, `rC` @ 333310.
 
 ## 1. UI mapping
 
 Three popup actions (reconstructed):
-
 ```js
 isLoadingSubmitPeerGrading -> await mD(); // submit (v2.03)
 isLoadingReview            -> await _D(); // review/grade peers (v2.03)
 isLoadingDisableAI         -> await d2(); // this file
 ```
 
+No standalone `autoGrade` or `disableAiGrading` flag exists in the bundle.
+
 ## 2. `d2 as requestGradingByPeer` — full logic
 
 ### 2.1 Guard + branch discovery
 
 ```js
-if (!location.href.includes("/learn/")) {
-  alert("This is not a course page...");
+if(!location[e(121)][e(143)](n[e(101)])){
+  alert(n.ikMpm);
   return;
 }
 ```
 
-Original `d2` head (verbatim, obfuscated):
+Decoded: `location.href.includes("/learn/")` → alert if not course page.
 
 ```js
-const d2=async()=>{var x;const e=ln,n={JxyDR:function(l,u){return l(u)},ikMpm:e(140),FYjIk:function(l,u){return l===u},YYFpo:e(122),plIvf:e(125),aARpG:function(l,u){return l!==u},qtFBp:e(106),bqFpc:e(129),ykzRD:e(118),NkREO:e(119),aaLSi:e(162),JpbYk:`mutation RequestGradingByPeer($input: PeerReviewAi_RequestGradingByPeerInput!) {
-  PeerReviewAi_RequestGradingByPeer(input: $input) {
-    submissionId
-    __typename
-  }
-}
-`};
+const t=(x=document[e(117)](e(114)))==null?void 0:x[e(150)];
+const r=t[e(130)](/(\d+~[A-Za-z0-9-_]+)/);
+const i=r==null?void 0:r[1][e(144)]("~")[0];
 ```
 
-Branch ID comes from an embedded script tag:
+Decoded:
+- `e(117)` = `document.querySelector`
+- `e(114)` = `"body > script:nth-child(3)"`
+- `e(150)` = `.innerText`
+- `e(130)` = `.match(/(\d+~[A-Za-z0-9-_]+)/)`
+- `e(144)` = `.split("~")[0]`
+- `i` = branchId (digits before `~`)
 
 ```js
-const t = document.querySelector("body > script:nth-child(3)")?.innerText;
-const r = t.match(/(\d+~[A-Za-z0-9-_]+)/);
-const i = r?.[1].split("~")[0]; // branchId = digits before "~"
+const s=fg();
+// s.course_id, s.item_id
 ```
 
-Course/item comes from the shared helper:
-
-```js
-const s = fg();
-// s.course_id, s.item_id  (see analysis/README.md)
-```
+`fg as getMetadata` @ 356668 — reads embedded course JSON from page header.
 
 ### 2.2 Resolve `submissionId` — REST
 
-```http
-GET https://www.coursera.org/api/onDemandPeerAssignmentPermissions.v1/<branchId>~<courseId>~<itemId>/?fields=deleteSubmission%2ClistSubmissions%2CreviewPeers%2CviewReviewSchema%2CanonymousPeerReview%2ConDemandPeerSubmissionProgresses.v1(latestSubmissionSummary%2ClatestDraftSummary%2ClatestAttemptSummary)%2ConDemandPeerReceivedReviewProgresses.v1(evaluationIfReady%2CearliestCompletionTime%2CreviewCount%2CdefaultReceivedReviewRequiredCount)%2ConDemandPeerDisplayablePhaseSchedules.v1(currentPhase%2CphaseEnds%2CphaseStarts)&includes=receivedReviewsProgress%2CsubmissionProgress%2CphaseSchedule
--> .linked.onDemandPeerSubmissionProgresses.v1[0].latestSubmissionSummary.id
+```js
+const a=await n[e(124)](fetch,e(142)+i+"~"+s[e(139)]+"~"+s[e(133)]+"/?fields=deleteSubmission%2ClistSubmissions%2CreviewPeers%2CviewReviewSchema%2CanonymousPeerReview%2ConDemandPeerSubmissionProgresses.v1(latestSubmissionSummary%2ClatestDraftSummary%2ClatestAttemptSummary)%2ConDemandPeerReceivedReviewProgresses.v1(evaluationIfReady%2CearliestCompletionTime%2CreviewCount%2CdefaultReceivedReviewRequiredCount)%2ConDemandPeerDisplayablePhaseSchedules.v1(currentPhase%2CphaseEnds%2CphaseStarts)&includes=receivedReviewsProgress%2CsubmissionProgress%2CphaseSchedule")[e(151)](l=>l[e(156)]())[e(151)](l=>{var u,f,p;return(p=(f=(u=l[e(152)])==null?void 0:u[e(107)][0])==null?void 0:f[e(102)])==null?void 0:p[e(126)].id});
 ```
 
-```js
-const a = await fetch(
-  "https://www.coursera.org/api/onDemandPeerAssignmentPermissions.v1/" +
-    i + "~" + s.course_id + "~" + s.item_id + "/?fields=..."
-).then((l) => l.json())
- .then((l) => l.linked.onDemandPeerSubmissionProgresses.v1[0].latestSubmissionSummary.id);
-```
+Decoded:
+- `e(142)` = `https://www.coursera.org/api/onDemandPeerAssignmentPermissions.v1/` (from `ln(566)`)
+- `s[e(139)]` = `s.course_id`
+- `s[e(133)]` = `s.item_id`
+- `e(151)` = `.then()`
+- `e(156)` = `.json()`
+- `e(152)` = `.linked`
+- `e(107)` = `onDemandPeerSubmissionProgresses.v1`
+- `e(102)` = `[0]` (array access)
+- `e(126)` = `.latestSubmissionSummary`
+- Result: `a = submissionId`
 
 ### 2.3 Force peer grading — GraphQL
 
-Original mutation document (verbatim from `JpbYk`):
+Original mutation document (verbatim from `n.JpbYk`):
 
 ```graphql
 mutation RequestGradingByPeer($input: PeerReviewAi_RequestGradingByPeerInput!) {
@@ -78,45 +80,57 @@ mutation RequestGradingByPeer($input: PeerReviewAi_RequestGradingByPeerInput!) {
 }
 ```
 
-```http
-POST https://www.coursera.org/graphql-gateway?opname=RequestGradingByPeer
-Content-Type: application/json
-
-[
-  {
-    "operationName": "RequestGradingByPeer",
-    "variables": {
-      "input": {
-        "courseId": "<course_id>",
-        "itemId": "<item_id>",
-        "submissionId": "<a>",
-        "reason": "EXPECTED_HIGHER_SCORE|ok"
+```js
+Cr();
+await fetch(n.bqFpc,{
+  method:n[e(131)],
+  headers:{"Content-Type":e(138)},
+  body:JSON[e(111)]([{
+    operationName:n[e(128)],
+    variables:{
+      input:{
+        courseId:s[e(139)],
+        itemId:s.item_id,
+        submissionId:a,
+        reason:n[e(149)]
       }
     },
-    "query": "mutation RequestGradingByPeer... (above)"
-  }
-]
--> if (status === 200) location.reload()
+    query:n[e(153)]
+  }])
+})[e(151)](l=>{
+  if(l.status===200)location.reload()
+}).catch(l=>console[e(135)](l));
 ```
 
-Note the array envelope (`[ {...} ]`) — required, not a bare object.
+Decoded:
+- `n.bqFpc` = `ln(129)` = `https://www.coursera.org/graphql-gateway?opname=RequestGradingByPeer`
+- `e(131)` = `"POST"`
+- `e(138)` = `"application/json"`
+- `e(111)` = `JSON.stringify`
+- `e(128)` = `"RequestGradingByPeer"`
+- `e(149)` = `ln(162)` = `"EXPECTED_HIGHER_SCORE|ok"`
+- `e(153)` = the GraphQL mutation document string
+- `Cr()` = vendor gate (clone replaces with noop/true)
+- On status 200 → `location.reload()`
 
-## 3. Rubric helpers (`tC`/`rC`) — grading assistance context
+Note the **array envelope** (`[{...}]`) — required, not a bare object.
 
-Selectors (decoded):
+## 3. Rubric helpers (`tC`/`rC`)
 
-- `[data-testid="rubric-options-list"] > div`
-- `.css-1ast7yb`, `.css-152mfh`, `.css-132oxzc .css-g2bbpm`
-- `.css-x3q7o9 > div:nth-child(2)`, `.rc-CML`
-- `div[role="group"]`
+### `tC(container)` @ 332273
 
+Reads rubric UI:
+- `[data-testid="rubric-options-list"] > div` — option rows
+- `.css-1ast7yb`, `.css-152mfh`, `.css-132oxzc .css-g2bbpm` — score labels
+- `.css-x3q7o9 > div:nth-child(2)`, `.rc-CML` — description text
+- `div[role="group"]` — rubric groups
+
+Returns `{ overview, rubricDetails: ["Title: desc", ...], feedback }`.
+
+### `rC(code)` @ 333310
+
+Builds prompt + POSTs to author server:
 ```js
-// tC(container) -> { overview, rubricDetails: ["Title: desc", ...], feedback }
-const tC = (e) => {
-  // reads overview textContent.trim(), rubric rows, feedback box
-};
-
-// rC(code) builds prompt + POSTs to author server:
 const prompt =
   "Strict output rules:\n" +
   "- Use plain text...\n" +
@@ -130,7 +144,7 @@ await fetch("https://cosemira.com/contribute", {
 });
 ```
 
-`rC` uses hard-coded `https://cosemira.com/contribute` (see `v4/01-server-spec.md`).
+Hard-coded `https://cosemira.com/contribute` (see `v4/01-server-spec.md`).
 
 ## 4. Clone checklist (v2.02)
 
@@ -139,3 +153,4 @@ await fetch("https://cosemira.com/contribute", {
 - [ ] `GET PeerAssignmentPermissions -> submissionId`.
 - [ ] `POST graphql-gateway?opname=RequestGradingByPeer` with array body + reload on 200.
 - [ ] Optional rubric parser `tC()` for future auto-grade UI.
+- [ ] Reason string: `"EXPECTED_HIGHER_SCORE|ok"`.
