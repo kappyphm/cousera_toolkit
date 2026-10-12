@@ -328,4 +328,8 @@ export async function resolveWeekMaterial(
   log.info("resolve", "Skip Videos & Readings Completed!", {
     courseId, slug, ms: Math.round(performance.now() - started)
   });
+  // Post-release UX (v1.0.0): mirror skip-discussing pattern — let the user
+  // see the page tick state, then reload so progress renders fresh.
+  await sleep(2000);
+  window.location.reload();
 }
