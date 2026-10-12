@@ -68,10 +68,14 @@ export async function getCourseMaterials(): Promise<CourseMaterials> {
   }
   log.info("getCourseMaterials", `fetch materials slug=${slug}`, { slug });
   const started = performance.now();
+  // Exact strings decoded from prototype Bn() (table ra, base 215):
+  // Bn(218) + slug + Bn(227) — includes must contain `items` and fields must
+  // request contentSummary, otherwise linked.onDemandCourseMaterialItems.v2
+  // is absent and typeName filtering is impossible.
   const res = await fetch(
     "https://www.coursera.org/api/onDemandCourseMaterials.v2/?q=slug&slug=" +
-      encodeURIComponent(slug) +
-      "&includes=modules%2Clessons%2CpassableItemGroups%2Ctracks&showLockedItems=true"
+      slug + // prototype: plain concat (Bn218 + t + Bn227), no encoding
+      "&includes=modules%2Clessons%2CpassableItemGroups%2CpassableItemGroupChoices%2CpassableLessonElements%2Citems%2Ctracks%2CgradePolicy%2CgradingParameters%2CembeddedContentMapping&fields=moduleIds%2ConDemandCourseMaterialModules.v1(name%2Cslug%2Cdescription%2CtimeCommitment%2ClessonIds%2Coptional%2ClearningObjectives)%2ConDemandCourseMaterialLessons.v1(name%2Cslug%2CtimeCommitment%2CelementIds%2Coptional%2CtrackId)%2ConDemandCourseMaterialPassableItemGroups.v1(requiredPassedCount%2CpassableItemGroupChoiceIds%2CtrackId)%2ConDemandCourseMaterialPassableItemGroupChoices.v1(name%2Cdescription%2CitemIds)%2ConDemandCourseMaterialPassableLessonElements.v1(gradingWeight%2CisRequiredForPassing)%2ConDemandCourseMaterialItems.v2(name%2CoriginalName%2Cslug%2CtimeCommitment%2CcontentSummary%2CisLocked%2ClockableByItem%2CitemLockedReasonCode%2CtrackId%2ClockedStatus%2CitemLockSummary)%2ConDemandCourseMaterialTracks.v1(passablesCount)%2ConDemandGradingParameters.v1(gradedAssignmentGroups)%2CcontentAtomRelations.v1(embeddedContentSourceCourseId%2CsubContainerId)&showLockedItems=true"
   );
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -87,17 +91,27 @@ export async function getCourseMaterials(): Promise<CourseMaterials> {
   const body = (await res.json()) as {
     linked?: Record<string, Array<{ id: string }>>;
   };
+  const linkedKeys = Object.keys(body?.linked ?? {});
   const data = body?.linked?.["onDemandCourseMaterialItems.v2"] as
     | MaterialItem[]
     | undefined;
   const courseId = body?.linked?.["onDemandCourseMaterialGradePolicy.v1"]?.[0]
     ?.id as string | undefined;
   if (!data || !courseId) {
+    log.error("getCourseMaterials", "payload missing linked items", {
+      slug,
+      status: res.status,
+      linkedKeys,
+      hasItems: Boolean(data),
+      hasCourseId: Boolean(courseId),
+      bodyPreview: JSON.stringify(body).slice(0, 400)
+    });
     throw new CloneError("course materials payload missing linked items", {
       module: "coursera-shared",
       step: "getCourseMaterials",
       slug,
-      status: res.status
+      status: res.status,
+      linkedKeys
     });
   }
   log.info("getCourseMaterials", `ok items=${data.length} courseId=${courseId}`, {

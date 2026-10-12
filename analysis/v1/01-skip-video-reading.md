@@ -47,12 +47,13 @@ Original concept (identifiers obfuscated, strings partially decoded):
 // slug: 5th segment of /learn/<slug>/...
 const t = window.location.href.split("/")[4];
 
-// plain-adjacent decoded paths (table Bn/ra, offset 215):
+// EXACT strings decoded from prototype `Bn()` (table `ra`, base 215, rotation (ra,191423)):
 // Bn(218) = "https://www.coursera.org/api/onDemandCourseMaterials.v2/?q=slug&slug="
-// Bn(227) = "&includes=modules%2Clessons%2CpassableItemGroups%2C...&showLockedItems=true"
-const r = await fetch(
-  "https://www.coursera.org/api/onDemandCourseMaterials.v2/?q=slug&slug=" + t + "&includes=..."
-).then((l) => l.json());
+// Bn(227) = "&includes=modules%2Clessons%2CpassableItemGroups%2CpassableItemGroupChoices%2CpassableLessonElements%2Citems%2Ctracks%2CgradePolicy%2CgradingParameters%2CembeddedContentMapping&fields=moduleIds%2ConDemandCourseMaterialModules.v1(name%2Cslug%2Cdescription%2CtimeCommitment%2ClessonIds%2Coptional%2ClearningObjectives)%2ConDemandCourseMaterialLessons.v1(name%2Cslug%2CtimeCommitment%2CelementIds%2Coptional%2CtrackId)%2ConDemandCourseMaterialPassableItemGroups.v1(requiredPassedCount%2CpassableItemGroupChoiceIds%2CtrackId)%2ConDemandCourseMaterialPassableItemGroupChoices.v1(name%2Cdescription%2CitemIds)%2ConDemandCourseMaterialPassableLessonElements.v1(gradingWeight%2CisRequiredForPassing)%2ConDemandCourseMaterialItems.v2(name%2CoriginalName%2Cslug%2CtimeCommitment%2CcontentSummary%2CisLocked%2ClockableByItem%2CitemLockedReasonCode%2CtrackId%2ClockedStatus%2CitemLockSummary)%2ConDemandCourseMaterialTracks.v1(passablesCount)%2ConDemandGradingParameters.v1(gradedAssignmentGroups)%2CcontentAtomRelations.v1(embeddedContentSourceCourseId%2CsubContainerId)&showLockedItems=true"
+// NOTE: `includes` must contain `items` and `fields` must request
+// `contentSummary` — otherwise `linked.onDemandCourseMaterialItems.v2`
+// is absent (root cause of the first v1 run failure).
+const r = await fetch(Bn218 + t + Bn227).then((l) => l.json());
 
 const data = r?.linked?.["onDemandCourseMaterialItems.v2"];
 const courseId = r?.linked?.["onDemandCourseMaterialGradePolicy.v1"]?.[0]?.id;
