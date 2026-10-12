@@ -56,15 +56,15 @@ Background tail export (verbatim, obfuscated identifiers):
 - **v1:** skip video/reading, skip discussing
   - `v1/01-skip-video-reading.md` — `dD as resolveWeekMaterial` (decoder `an`, base 290)
   - `v1/02-skip-discussing.md` — `vD as handleDiscussionPrompt` (decoder `ke`, base 120)
-- **v2:** auto submit, auto grade, disable AI grading, auto peer review, shareable link
-  - `v2/01-auto-submit-quiz.md` — `x2 as handleAutoquiz` @ 705766 (decoder `sn`, base 345)
+- **v2:** auto submit (assignment), auto grade, disable AI grading, auto peer review, shareable link
+  - `v2/01-auto-submit-assignment.md` — `mD as handlePeerGradedAssignment` @ 738051 (decoder `Mn`, base 276)
   - `v2/02-auto-grade-disable-ai-grading.md` — `d2 as requestGradingByPeer` @ 752402 (decoder `ln`, base 101)
-  - `v2/03-auto-peer-review.md` — `mD` @ 738051, `_D` @ 761766, `Pd` @ 757644 (decoders `Mn`/`Sn`/`Ke`)
+  - `v2/03-auto-peer-review.md` — `_D as handleReview` @ 761766 + `Pd` @ 757644 (decoders `Sn`/`Ke`)
   - `v2/04-shareable-link.md` — `yy` @ ~167960 (decoder `Re`, base 492) + background `i` (base 377)
-- **v3:** AI auto quiz, bypass locked browser
-  - `v3/01-ai-auto-quiz.md`
+- **v3:** AI auto quiz (`x2 as handleAutoquiz` @ 705766, decoder `sn` base 345; fill via `cC`/`rD`/`oD` + Gemini), bypass locked browser
+  - `v3/01-ai-auto-quiz.md` — superseded by v2 analysis (x2 decoded while planning v2.01; see git history)
   - `v3/02-bypass-locked-browser.md`
-- **v4:** nodejs server for question/answer collection
+- **v4:** nodejs server for question/answer collection (mirror prototype `cC`→`https://cosemira.com/quiz` contract, `oD` upload)
   - `v4/01-server-spec.md`
 
 ## Reading convention used in all docs

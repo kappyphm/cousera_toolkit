@@ -1,6 +1,6 @@
 # v3.01 — AI Auto Quiz (`x2`, `rD`, `nD`, `jz`, `Qz`, `Yc`, `u2`, `Et`, `TD`, `oD`, `cC`, `uC`)
 
-Source: `assets/chunk-674d105d.js`. Fill+submit entry `x2 as handleAutoquiz`; submit half is in `v2/01`; this file is the answering engine.
+Source: `assets/chunk-674d105d.js`. Fill+submit entry `x2 as handleAutoquiz`; submit orchestration verified in Appendix A below; this file is the answering engine.
 
 Pipeline:
 
@@ -305,3 +305,81 @@ Uses `CAUTH/CSRF3-Token`, no Gemini key. Quiz path does not depend on it; keep f
 - [ ] Stub `/quiz` + `uC()` decrypt (keep key/IV for compat).
 - [ ] `AIProvider` with Gemini first; `Qz/Yc/schema` verbatim behavior.
 - [ ] `u2/Et` fill + badges; `TD/oD` collect/upload.
+
+## Appendix A — `x2 as handleAutoquiz` submit orchestration (verified)
+
+Source: `x2` @ 705766–709520 (body len 3754). Decoder `sn` (table `na`, base 345, rotation (na, 649582)).
+Trigger: in-page panel button (`@348754`: `onClick: await x2(u, m)`) **and** auto-run on URL condition (`@323018`: `... && await x2(w, l)`).
+
+### A.1 Toast config (corrected)
+
+Wrapper `Un("promise")(fn, {loading, success, error})`:
+
+```js
+{ loading: "Processing quiz...",   // sn(349)
+  success: "Quiz completed!",      // sn(365)
+  error:   "Failed to process quiz" }  // sn(334)  [corrects earlier claim of sn(392)]
+```
+
+### A.2 Storage + guards (verified sequence)
+
+```js
+const { isAutoSubmitQuiz: flag } = await chrome.storage.local.get("isAutoSubmitQuiz");
+
+// Not on /attempt → start-attempt path
+if (!location.href.includes("/attempt")) {
+  await waitForSelector(CoverPageActionButton /* sn(411) */, 3_600_000)
+    .then((btn) => btn.click()).catch(() => {});
+  let overlay = document.querySelector('[data-testid="tunnel-vision-content"]');  // r.Rqxdz
+  for (; !overlay;) {
+    await sleep(1000);
+    await waitForSelector(StartAttemptModalPrimary /* sn(357) */, 1000)
+      .then((btn) => btn.click()).catch(() => {});
+    overlay = document.querySelector('[data-testid="tunnel-vision-content"]');
+    setState((s) => ({ ...s, isLoadingQuiz: true }));
+  }
+}
+if (location.href.includes("/view-feedback")) return;   // sn(356)
+await waitForSelector(".css-1hhf6i, .rc-FormPartsQuestion" /* sn(346) */, 20_000).catch(() => {});
+document.querySelector('button[aria-label="Back"]')?.addEventListener("click", () => window.history.back());
+await waitForSelector('.rc-CodeBlock, .icon-container, [data-testid="action-feedback-icon-container"]' /* sn(409) */, 2000)
+  .then(async (el) => { if (el) await sleep(5000); }).catch(() => {});
+```
+
+### A.3 Fill + submit (verified)
+
+```js
+const questions = document.querySelectorAll(".css-1hhf6i, .rc-FormPartsQuestion");
+const answers = await collectAnswers(code);           // cC → cosemira / AI (this doc)
+if (answers?.error) return;
+const filled = await fillQuestions(questions, answers); // rD
+setState((s) => ({ ...s, isLoadingQuiz: false }));
+
+await waitForSelector("#agreement-checkbox-base" /* sn(403) */, 6000).then((el) => el.click()).catch(() => {});
+await sleep(2000);
+
+if (flag ?? false) {
+  // confirm dialog loop
+  let dialog = document.querySelector(".cds-Dialog-dialog");
+  await waitForSelector('[data-testid="input-area"] input' /* sn(363) */, 2000)
+    .then((el) => { el.click(); el.dispatchEvent(new Event("input", { bubbles: true })); }).catch(() => {});
+  for (; !dialog;) {
+    await waitForSelector('button[data-testid="submit-button"], button[data-test="submit-button"]' /* sn(380) */, 10_000)
+      .then((el) => el.click()).catch(() => {});
+    await sleep(1000);
+    dialog = document.querySelector(".cds-Modal-container");
+  }
+  await waitForSelector('button[data-testid="dialog-submit-button"]' /* literal OmMPP */, 10_000)
+    .then((el) => el.click()).catch(() => {});
+  if (!filled || filled.length == 0) return;          // mvQAW loose-equal
+  let tv = document.querySelector('[data-testid="tunnel-vision-content"]');
+  for (; tv;) await sleep(1000), tv = document.querySelector('[data-testid="tunnel-vision-content"]');
+  await sleep(2000);
+  await waitForSelector('button[data-testid="view-feedback-button"]' /* sn(381) */);
+  document.querySelector('button[data-testid="view-feedback-button"]')?.click();
+  await uploadResults(filled, code);                   // oD → v4 server
+}
+setState((s) => ({ ...s, isLoadingQuiz: false }));
+```
+
+Note: `for (;!dialog;)` has no cap in prototype (infinite 1s click loop if confirm never appears). Clone must log each iteration.
