@@ -169,10 +169,15 @@ export async function getUserId(): Promise<string> {
   return String(parsed.id);
 }
 
+/** Raw CSRF3-Token cookie value (prototype `l`). */
+export function csrfToken(): string | null {
+  const m = document.cookie.match(/(?:^|;\s*)CSRF3-Token\s*=\s*([^;]+)/);
+  return m?.[1] ?? null;
+}
+
 /** 1:1 CSRF header builder from prototype `l(v)`. */
 export function csrfHeaders(extra: Record<string, string> = {}): Record<string, string> {
-  const m = document.cookie.match(/(?:^|;\s*)CSRF3-Token\s*=\s*([^;]+)/);
-  const csrf = m?.[1];
+  const csrf = csrfToken();
   if (!csrf) log.warn("csrfHeaders", "CSRF3-Token cookie missing — requests may 403");
   return {
     "Content-Type": "application/json",

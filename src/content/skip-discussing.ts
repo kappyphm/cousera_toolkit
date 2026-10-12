@@ -3,7 +3,7 @@
 // Same guards, cooldown, GET prompt -> POST co-content answer, pacing, reload.
 // No vendor gate, no silent catch — every failure throws CloneError.
 import {
-  csrfHeaders,
+  csrfToken,
   getCourseMaterials,
   getUserId,
   sleep
@@ -14,13 +14,6 @@ const log = createLogger("skip-discussing");
 
 export const DEFAULT_DISCUSSION_CONTENT = "Very interesting course";
 export const COOLDOWN_KEY = "discussionLimitExpiredTime";
-
-function escXml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
 
 interface PromptQuestion {
   elements?: Array<{
@@ -55,25 +48,33 @@ async function getForumQuestionSuffix(
   return L;
 }
 
-/** 1:1 POST — co-content answer envelope. */
+/** 1:1 POST — co-content answer envelope (prototype: headers only x-csrf3-token). */
 async function postAnswer(
   courseId: string, questionSuffix: string, text: string, itemId: string
 ): Promise<void> {
+  // Exact URL from prototype ke(149) (decoded table `ke`).
   const url =
     "https://www.coursera.org/api/onDemandCourseForumAnswers.v1/" +
-    "?fields=content%2CforumQuestionId%2CcourseItemForumQuestionId&includes=profiles%2Cchildren%2CuserId";
+    "?fields=content%2CforumQuestionId%2CparentForumAnswerId%2Cstate%2CcreatorId%2CcreatedAt%2Corder%2CupvoteCount%2CchildAnswerCount%2CisFlagged%2CisUpvoted%2CcourseItemForumQuestionId%2CparentCourseItemForumAnswerId%2ConDemandSocialProfiles.v1(userId%2CexternalUserId%2CfullName%2CphotoUrl%2CcourseRole)%2ConDemandCourseForumAnswers.v1(content%2CforumQuestionId%2CparentForumAnswerId%2Cstate%2CcreatorId%2CcreatedAt%2Corder%2CupvoteCount%2CchildAnswerCount%2CisFlagged%2CisUpvoted%2CcourseItemForumQuestionId%2CparentCourseItemForumAnswerId)&includes=profiles%2Cchildren%2CuserId";
+  const token = csrfToken();
+  if (!token) {
+    throw new CloneError("CSRF3-Token cookie missing", {
+      module: "skip-discussing", step: "postAnswer", courseId, itemId
+    });
+  }
   log.info("postAnswer", `POST item=${itemId} q=${questionSuffix}`, {
     courseId, itemId
   });
   const res = await fetch(url, {
     method: "POST",
-    headers: { ...csrfHeaders(), "x-csrf3-token": csrfHeaders()["X-CSRF3-Token"] ?? "" },
+    headers: { "x-csrf3-token": token },
     body: JSON.stringify({
       content: {
         typeName: "cml",
         definition: {
           dtdId: "discussion/1",
-          value: `<co-content><text>${escXml(text)}</text></co-content>`
+          // ke(160)+content+ke(177) — prototype does NOT escape content.
+          value: `<co-content><text>${text}</text></co-content>`
         }
       },
       courseForumQuestionId: `${courseId}~${questionSuffix}`

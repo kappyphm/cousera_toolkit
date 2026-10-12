@@ -75,9 +75,10 @@ const L = v.courseItemForumQuestionId.split("~")[2];
 ## 3. Post answer — POST `co-content`
 
 ```http
-POST https://www.coursera.org/api/onDemandCourseForumAnswers.v1/?fields=content%2CforumQuestionId%2C...%2CcourseItemForumQuestionId%2C...&includes=profiles%2Cchildren%2CuserId
+POST https://www.coursera.org/api/onDemandCourseForumAnswers.v1/?fields=content%2CforumQuestionId%2CparentForumAnswerId%2Cstate%2CcreatorId%2CcreatedAt%2Corder%2CupvoteCount%2CchildAnswerCount%2CisFlagged%2CisUpvoted%2CcourseItemForumQuestionId%2CparentCourseItemForumAnswerId%2ConDemandSocialProfiles.v1(userId%2CexternalUserId%2CfullName%2CphotoUrl%2CcourseRole)%2ConDemandCourseForumAnswers.v1(content%2CforumQuestionId%2CparentForumAnswerId%2Cstate%2CcreatorId%2CcreatedAt%2Corder%2CupvoteCount%2CchildAnswerCount%2CisFlagged%2CisUpvoted%2CcourseItemForumQuestionId%2CparentCourseItemForumAnswerId)&includes=profiles%2Cchildren%2CuserId
 Method: POST
-x-csrf3-token: <csrf>
+x-csrf3-token: <csrf>          (ONLY this header — no Content-Type, per prototype)
+                                (value text is inserted raw — prototype does NOT escape XML)
 
 {
   "content": {
