@@ -6,7 +6,7 @@
   "scripts": {
     "preview": "vite preview",
     "dev": "vite",
-    "build": "tsc --noEmit && vite build"
+    "build": "tsc --noEmit && vite build && vite build --config vite.content.config.ts"
   },
   "keywords": [],
   "author": "",

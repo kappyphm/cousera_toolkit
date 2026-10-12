@@ -21,7 +21,6 @@ export default defineConfig({
     rollupOptions: {
       input: {
         popup: "popup.html",
-        content: "src/content/main.ts",
         background: "src/background/sw.ts"
       },
       output: {
