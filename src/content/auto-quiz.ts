@@ -124,8 +124,9 @@ const ANSWER_SCHEMA = {
  */
 /**
  * Resolve the API key, then try models in candidate order — a model
- * whose DAILY quota is exhausted hands over to the next candidate
- * (quotas are per-model), everything else throws immediately.
+ * whose DAILY quota is exhausted, or that stays overloaded (503),
+ * hands over to the next candidate (quotas are per-model), everything
+ * else throws immediately.
  */
 async function solveWithGemini(containers: Element[]): Promise<QuizTerm[] | null> {
   const stored = await chrome.storage.local.get(["geminiAPI", "model"]);
@@ -147,17 +148,26 @@ async function solveWithGemini(containers: Element[]): Promise<QuizTerm[] | null
     } catch (e) {
       lastErr = e;
       const info = parseGeminiError(e);
-      if (!info.dailyQuota) throw e;
+      // Same "unusable model" rule as jz: daily quota gone, or the
+      // model stayed overloaded (503) through the retry layer.
+      const unusable = info.dailyQuota || info.status === 503;
+      if (!unusable) throw e;
       const next = candidates[i + 1];
       if (next) {
-        log.warn("nD", `model ${model} daily quota exhausted — falling back to ${next}`);
-        notifyUser(`Model ${model} đã hết quota ngày — chuyển sang ${next}…`, "warn", 9000);
+        const reason = info.dailyQuota ? "đã hết quota ngày" : "đang quá tải (503)";
+        log.warn("nD", `model ${model} unusable (${reason}) — falling back to ${next}`);
+        notifyUser(`Model ${model} ${reason} — chuyển sang ${next}…`, "warn", 9000);
       }
     }
   }
   const info = parseGeminiError(lastErr);
+  const reason = info.dailyQuota
+    ? "đã hết quota ngày"
+    : info.status === 503
+      ? "đang quá tải (503)"
+      : "không dùng được";
   throw new CloneError(
-    `Tất cả model đều đã hết quota ngày (đã thử: ${candidates.join(", ")}). ${info.summary}`,
+    `Tất cả model đều ${reason} (đã thử: ${candidates.join(", ")}). ${info.summary}`,
     { module: "auto-quiz", step: "nD.models", models: candidates }
   );
 }
@@ -192,10 +202,12 @@ async function solveWithModel(
     );
     text = res.text ?? "";
   } catch (e) {
-    // A 429 already exhausted the retry layer — the prototype fallback
-    // (retry without thinkingConfig) exists for config incompatibility,
-    // not for quota; do not burn another call on a rate limit.
-    if (parseGeminiError(e).status === 429) throw e;
+    // A 429/503 already exhausted the retry layer — the prototype
+    // fallback (retry without thinkingConfig) exists for config
+    // incompatibility, not for quota/overload; do not burn another
+    // retry round on the same unusable model.
+    const st = parseGeminiError(e).status;
+    if (st === 429 || st === 503) throw e;
     log.warn("nD", "call with thinkingConfig failed — retrying without it (prototype fallback)", {
       error: (e as Error).message
     });

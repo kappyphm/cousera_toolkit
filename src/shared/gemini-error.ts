@@ -16,6 +16,8 @@ export interface GeminiErrorInfo {
   retryable: boolean;
   /** Short human summary (Vietnamese) for toast + logs. */
   summary: string;
+  /** The API's own `error.message`, first line, truncated — for detail. */
+  apiMessage?: string;
 }
 
 function errorText(e: unknown): string {
@@ -71,6 +73,19 @@ export function parseGeminiError(e: unknown): GeminiErrorInfo {
   const dailyQuota = /per day|PerDay/i.test(text);
   const retryable = !dailyQuota && (status === 429 || status === 500 || status === 503);
 
+  // The API's own message: from the JSON payload ("message":"...") when
+  // present, first line only, so user-facing errors stay readable.
+  let apiMessage: string | undefined;
+  const mm = text.match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+  if (mm) {
+    try {
+      apiMessage = JSON.parse(`"${mm[1] as string}"`) as string;
+    } catch {
+      apiMessage = mm[1] as string;
+    }
+    apiMessage = apiMessage.split("\n")[0]?.slice(0, 220);
+  }
+
   const summary = dailyQuota
     ? `Gemini đã hết quota ngày (free tier)${
         retryDelaySeconds !== undefined
@@ -79,11 +94,13 @@ export function parseGeminiError(e: unknown): GeminiErrorInfo {
       }`
     : status === 429
       ? "Gemini bị rate limit (429)"
-      : status !== undefined
-        ? `Gemini API lỗi ${status}`
-        : "Gemini API lỗi không rõ";
+      : status === 503
+        ? "Model Gemini đang quá tải (503 UNAVAILABLE)"
+        : status !== undefined
+          ? `Gemini API lỗi ${status}`
+          : "Gemini API lỗi không rõ";
 
-  return { status, retryDelaySeconds, dailyQuota, retryable, summary };
+  return { status, retryDelaySeconds, dailyQuota, retryable, summary, apiMessage };
 }
 
 /**

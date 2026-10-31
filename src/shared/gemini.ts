@@ -134,7 +134,8 @@ export interface GeminiRequest {
 /**
  * 1:1 of `jz` — fetch answer from Gemini with storage key.
  * Extension over the prototype: free-tier daily quotas are per-model,
- * so when the selected model's daily quota is exhausted the call falls
+ * so when the selected model's daily quota is exhausted — or the model
+ * stays overloaded (503) through the retry layer — the call falls
  * back through modelCandidates() (with a user-visible toast) instead of
  * killing the whole run. Surfaced errors use the friendly summary from
  * parseGeminiError, not the raw API JSON.
@@ -186,11 +187,17 @@ export async function fetchGeminiAnswer(req: GeminiRequest): Promise<string> {
       lastErr = e;
       const info = parseGeminiError(e);
       log.error("jz", "Gemini API Error:", { model, error: (e as Error).message });
-      if (!info.dailyQuota) {
+      // A model is "unusable for this run" when its daily quota is gone
+      // OR it stayed overloaded (503) through the whole retry layer —
+      // either way the next candidate may still answer.
+      const unusable = info.dailyQuota || info.status === 503;
+      if (!unusable) {
         throw new CloneError(
           info.status === 429
             ? info.summary
-            : `Gemini API call failed: ${(e as Error).message}`,
+            : info.status !== undefined
+              ? `${info.summary}${info.apiMessage ? `: ${info.apiMessage}` : ""}`
+              : `Gemini API call failed: ${(e as Error).message}`,
           {
             module: "gemini",
             step: "generateContent",
@@ -201,18 +208,20 @@ export async function fetchGeminiAnswer(req: GeminiRequest): Promise<string> {
       }
       const next = candidates[i + 1];
       if (next) {
-        log.warn("jz", `model ${model} daily quota exhausted — falling back to ${next}`);
-        notifyUser(
-          `Model ${model} đã hết quota ngày — chuyển sang ${next}…`,
-          "warn",
-          9000
-        );
+        const reason = info.dailyQuota ? "đã hết quota ngày" : "đang quá tải (503)";
+        log.warn("jz", `model ${model} unusable (${reason}) — falling back to ${next}`);
+        notifyUser(`Model ${model} ${reason} — chuyển sang ${next}…`, "warn", 9000);
       }
     }
   }
   const info = parseGeminiError(lastErr);
+  const reason = info.dailyQuota
+    ? "đã hết quota ngày"
+    : info.status === 503
+      ? "đang quá tải (503)"
+      : "không dùng được";
   throw new CloneError(
-    `Tất cả model đều đã hết quota ngày (đã thử: ${candidates.join(", ")}). ${info.summary}`,
+    `Tất cả model đều ${reason} (đã thử: ${candidates.join(", ")}). ${info.summary}`,
     { module: "gemini", step: "generateContent", models: candidates }
   );
 }
