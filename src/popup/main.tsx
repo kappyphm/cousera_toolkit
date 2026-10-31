@@ -7,12 +7,20 @@ function Popup() {
   // ("Gemini API:"), persisted to chrome.storage.local {geminiAPI}; model in {model}.
   const [geminiKey, setGeminiKey] = React.useState("");
   const [model, setModel] = React.useState("gemini-2.5-flash");
+  // Prototype storage flag (x2 orchestration): chrome.storage.local
+  // {isAutoSubmitQuiz} gates the quiz auto-submit chain.
+  const [autoSubmitQuiz, setAutoSubmitQuiz] = React.useState(false);
   React.useEffect(() => {
-    void chrome.storage.local.get(["geminiAPI", "model"]).then((s) => {
+    void chrome.storage.local.get(["geminiAPI", "model", "isAutoSubmitQuiz"]).then((s) => {
       if (typeof s?.geminiAPI === "string") setGeminiKey(s.geminiAPI);
       if (typeof s?.model === "string") setModel(s.model);
+      if (typeof s?.isAutoSubmitQuiz === "boolean") setAutoSubmitQuiz(s.isAutoSubmitQuiz);
     });
   }, []);
+  const saveAutoSubmitQuiz = async (checked: boolean) => {
+    setAutoSubmitQuiz(checked);
+    await chrome.storage.local.set({ isAutoSubmitQuiz: checked });
+  };
   const saveGemini = async () => {
     await chrome.storage.local.set({ geminiAPI: geminiKey, model });
     setStatus("gemini: key+model saved");
@@ -56,7 +64,20 @@ function Popup() {
       <br /><br />
       <button onClick={() => void run("submit-text-assignment")}>
         Fill answer (Gemini)
+      </button>{" "}
+      <button onClick={() => void run("auto-quiz")}>
+        Auto answer quiz (Gemini)
       </button>
+      <p style={{ margin: "4px 0 0", color: "#555", fontSize: 12 }}>
+        <label>
+          <input
+            type="checkbox"
+            checked={autoSubmitQuiz}
+            onChange={(e) => void saveAutoSubmitQuiz(e.target.checked)}
+          />{" "}
+          Auto submit quiz (tắt = chỉ điền, tự nộp tay)
+        </label>
+      </p>
       <p style={{ margin: "4px 0 0", color: "#555", fontSize: 12 }}>
         Fill-only: review content, then Save draft → honor → Submit by hand.
       </p>
