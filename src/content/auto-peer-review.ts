@@ -6,12 +6,20 @@
 // GitHub issue for this port):
 //  1. §3.4 does not decode Pd's submit selectors (a(290) container,
 //     a(327) button). Fallback below uses mD's decoded submit selectors
-//     at document level — verify against the bundle to finalize.
+//     at document level, plus a text-based fallback ("Submit Review")
+//     grounded in a real current-UI review page (issue #28).
 //  2. §3.3's textarea query holder is an ambiguous single-letter var;
 //     ported at document scope (the submit feedback box is unique on
 //     the review page).
 //  3. §4.5 does not fix Cr()'s position inside _D; placed right after
 //     the guard, matching dD/vD.
+//  4. Current-UI adaptations (issue #28, evidence: a saved review page
+//     from 2026-10-31): rubric groups are [role="radiogroup"] (the old
+//     div[role="group"] is gone), the ready-wait anchor .css-2imjyh is
+//     gone, and the §3.3 feedback match is now a WRAPPER div whose
+//     editable is an inner textarea — the length==1 check stays on the
+//     wrapper (its textContent is still exactly 1 zero-width char),
+//     but focus must land on the inner textarea for insertText to work.
 import { sleep, waitForSelector } from "../shared/coursera.ts";
 import { createLogger } from "../shared/logger.ts";
 
@@ -31,15 +39,38 @@ function gate(): void {
 const SUBMIT_SELECTOR =
   'button[aria-label="Submit"], button[data-e2e="submit-assignment"]';
 
+/**
+ * Submit-button finder. Primary: mD's bundle-decoded selectors (the
+ * §3.4 pair was never decoded). Fallback (issue #28): the current
+ * review UI's submit is a CDS button whose only stable hook is its
+ * exact label "Submit Review" — no testid/aria-label/data-e2e.
+ */
+function findSubmitButton(): HTMLElement | null {
+  const direct = document.querySelector<HTMLElement>(SUBMIT_SELECTOR);
+  if (direct) return direct;
+  return (
+    Array.from(document.querySelectorAll<HTMLElement>("button")).find(
+      (b) => (b.textContent ?? "").trim() === "Submit Review"
+    ) ?? null
+  );
+}
+
 /** 1:1 of `Pd` — grade one peer item on the review page. */
 async function gradeOnePeerItem(): Promise<void> {
   log.info("Pd", "grade one peer item — start");
 
   // §3.1 Review container wait (se rejects on timeout, like prototype).
-  await waitForSelector(".css-2imjyh .css-7jkbgo a", 1000);
+  // The decoded anchor (.css-2imjyh .css-7jkbgo a) no longer exists in
+  // the current UI; the union also accepts the new review form's own
+  // anchors so the wait resolves on either markup generation.
+  await waitForSelector(
+    '.css-2imjyh .css-7jkbgo a, .peer-option-input, div[data-testid="peer-review-multi-line-input-field"]',
+    1000
+  );
 
-  // §3.2 Rubric group loop.
-  const groups = document.querySelectorAll('div[role="group"]');
+  // §3.2 Rubric group loop. Current UI groups options in
+  // [role="radiogroup"] wrappers; div[role="group"] kept for old pages.
+  const groups = document.querySelectorAll('div[role="group"], [role="radiogroup"]');
   log.info("Pd", `rubric groups n=${groups.length}`);
   for (const a of groups) {
     const x = a.querySelectorAll<HTMLElement>(".option-contents > div:nth-child(1)");
@@ -62,14 +93,23 @@ async function gradeOnePeerItem(): Promise<void> {
     }
   }
 
-  // §3.3 Feedback textarea — verbatim mechanism (raw execCommand, "Good ").
+  // §3.3 Feedback textarea — verbatim mechanism (raw execCommand,
+  // "Good "), with one current-UI adaptation (issue #28): the matched
+  // element is now a wrapper div, so after clicking it, focus goes to
+  // the inner editable (textarea/contenteditable) when one exists —
+  // insertText only lands where the caret is. On old markup the match
+  // IS the field and behavior is unchanged.
   const u = document.querySelectorAll<HTMLElement>(
     '.c-peer-review-submit-textarea-input-field, div[data-testid="peer-review-multi-line-input-field"]'
   );
   for (const f of u) {
     if (f.textContent?.length === 1) {
       f.click();
-      f.focus();
+      const editable =
+        f.matches('textarea, [contenteditable="true"]')
+          ? f
+          : f.querySelector<HTMLElement>('textarea, [contenteditable="true"]');
+      (editable ?? f).focus();
       document.execCommand("insertText", false, "Good ");
       log.debug("Pd", 'feedback textarea filled with "Good "');
     }
@@ -80,7 +120,7 @@ async function gradeOnePeerItem(): Promise<void> {
   // scrollIntoView -> click) is the decoded one; the selector pair is
   // the flagged fallback above.
   setTimeout(() => {
-    const y = document.querySelector<HTMLElement>(SUBMIT_SELECTOR);
+    const y = findSubmitButton();
     if (y) {
       y.scrollIntoView();
       y.click();
