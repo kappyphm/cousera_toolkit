@@ -73,7 +73,7 @@ function Popup() {
       </button>
       <br /><br />
       <button onClick={() => void run("submit-text-assignment")}>
-        Fill answer (Gemini)
+        Fill assignment (Gemini)
       </button>{" "}
       <button onClick={() => void run("auto-quiz")}>
         Auto answer quiz (Gemini)

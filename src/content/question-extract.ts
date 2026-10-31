@@ -91,12 +91,49 @@ export function extractTextParts(): TextPart[] {
     });
     parts.push({ index: idx + 1, type, responseId, prompt, points, field });
   });
-  if (parts.length === 0) {
-    throw new CloneError("no text parts extracted", {
-      module: "question-extract",
-      step: "extract",
-      groups: groups.length
+  // No throw here: an assignment may be file-only. The caller checks
+  // the combined part count across both extractors.
+  if (parts.length === 0) log.info("extract", "no text parts on this assignment");
+  return parts;
+}
+
+export interface FilePart {
+  index: number;
+  type: string;
+  responseId: string;
+  prompt: string;
+  points: string;
+  /** The whole part group element (uploader lives inside it). */
+  container: HTMLElement;
+}
+
+/** Extract all file-upload parts (previously skipped by the text flow). */
+export function extractFileParts(): FilePart[] {
+  const groups = Array.from(
+    document.querySelectorAll<HTMLElement>('div[data-testid^="part-Submission_"]')
+  );
+  const parts: FilePart[] = [];
+  groups.forEach((g, idx) => {
+    const testid = g.getAttribute("data-testid") ?? "";
+    const type = testid.replace("part-Submission_", "");
+    if (type !== FILE_UPLOAD) return;
+    const labelledBy = g.getAttribute("aria-labelledby") ?? "";
+    const m = labelledBy.match(/submissionResponseId~(.+)-legend/);
+    const responseId = m?.[1] ?? "";
+    // Prompt: same element as text parts when responseId exists,
+    // otherwise any rich-text block inside the group.
+    const prompt = responseId
+      ? promptText(responseId)
+      : (g.querySelector<HTMLElement>(".rc-CML")?.innerText ?? "").trim();
+    const points =
+      g.querySelector('[data-testid="part-points"]')?.textContent?.trim() ?? "";
+    log.info("extract", `file part #${idx + 1} points="${points}"`, {
+      responseId,
+      promptLen: prompt.length,
+      hasUploader: Boolean(g.querySelector(".rc-UppyFileUploader button"))
     });
-  }
+    parts.push({ index: idx + 1, type, responseId, prompt, points, container: g });
+  });
+  if (parts.length === 0) log.info("extract", "no file parts on this assignment");
   return parts;
 }
