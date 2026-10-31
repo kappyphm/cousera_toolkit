@@ -15,13 +15,12 @@ function Popup() {
   const [autoRetry, setAutoRetry] = React.useState(true);
   React.useEffect(() => {
     void chrome.storage.local
-      .get(["geminiAPI", "model", "isAutoSubmitQuiz", "geminiAutoRetry", "geminiDelaySec"])
+      .get(["geminiAPI", "model", "isAutoSubmitQuiz", "geminiAutoRetry"])
       .then((s) => {
         if (typeof s?.geminiAPI === "string") setGeminiKey(s.geminiAPI);
         if (typeof s?.model === "string") setModel(s.model);
         if (typeof s?.isAutoSubmitQuiz === "boolean") setAutoSubmitQuiz(s.isAutoSubmitQuiz);
         if (typeof s?.geminiAutoRetry === "boolean") setAutoRetry(s.geminiAutoRetry);
-        if (typeof s?.geminiDelaySec === "number") setDelaySec(String(s.geminiDelaySec));
       });
   }, []);
   const saveAutoSubmitQuiz = async (checked: boolean) => {
@@ -32,16 +31,9 @@ function Popup() {
     setAutoRetry(checked);
     await chrome.storage.local.set({ geminiAutoRetry: checked });
   };
-  // Spacing between Gemini calls inside one assignment run, seconds
-  // (storage geminiDelaySec; read live by geminiInterRequestDelayMs).
-  const [delaySec, setDelaySec] = React.useState("10");
   const saveGemini = async () => {
-    const parsed = Number.parseInt(delaySec, 10);
-    const geminiDelaySec = Number.isFinite(parsed)
-      ? Math.max(0, Math.min(parsed, 300))
-      : 10;
-    await chrome.storage.local.set({ geminiAPI: geminiKey, model, geminiDelaySec });
-    setStatus("gemini: key+model+delay saved");
+    await chrome.storage.local.set({ geminiAPI: geminiKey, model });
+    setStatus("gemini: key+model saved");
   };
   const run = async (action: string) => {
     setStatus(`${action}…`);
@@ -115,16 +107,6 @@ function Popup() {
           type="text"
           value={model}
           onChange={(e) => setModel(e.target.value)}
-          style={{ width: "100%", margin: "4px 0" }}
-        />
-        <label htmlFor="gemini-delay">Delay giữa các câu (giây): </label>
-        <input
-          id="gemini-delay"
-          type="number"
-          min={0}
-          max={300}
-          value={delaySec}
-          onChange={(e) => setDelaySec(e.target.value)}
           style={{ width: "100%", margin: "4px 0" }}
         />
         <button onClick={() => void saveGemini()}>Save key</button>
