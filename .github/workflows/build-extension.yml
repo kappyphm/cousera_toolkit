@@ -1,0 +1,51 @@
+name: Build extension
+
+# Build an unpacked-extension package every time a pull request is
+# merged into main (user request 2026-10-31). The zip has manifest.json
+# at its root: extract it, then chrome://extensions → Developer mode →
+# Load unpacked → pick the extracted folder.
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+jobs:
+  build:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout merged commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        # Version is read from package.json "packageManager" (pnpm@12.11.2).
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build extension
+        run: pnpm build
+
+      - name: Package unpacked extension
+        run: |
+          SHORT_SHA=$(echo "${{ github.event.pull_request.merge_commit_sha }}" | cut -c1-7)
+          cd dist
+          zip -r "../cousera-toolkit-unpacked-${SHORT_SHA}.zip" .
+          cd ..
+          ls -la cousera-toolkit-unpacked-*.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cousera-toolkit-unpacked
+          path: cousera-toolkit-unpacked-*.zip
+          retention-days: 90
