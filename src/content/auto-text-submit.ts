@@ -8,7 +8,7 @@
 // module never clicks submit, never confirms dialogs, never chains
 // post-submit calls.
 import { sleep } from "../shared/coursera.ts";
-import { fetchGeminiAnswer } from "../shared/gemini.ts";
+import { fetchGeminiAnswer, geminiInterRequestDelayMs } from "../shared/gemini.ts";
 import { CloneError, createLogger } from "../shared/logger.ts";
 import { fillEditor, fillPlainInput } from "./editor-fill.ts";
 import { attachAnswerFile } from "./file-upload.ts";
@@ -124,10 +124,20 @@ export async function handleTextAssignmentSubmit(): Promise<void> {
       }
       done++;
       if (done < jobs.length) {
-        // Pacing between Gemini calls (backlog #1): a random 3–5s gap
-        // between parts so rapid multi-part runs do not trip the
-        // per-minute rate limit.
-        await sleep(3000 + Math.floor(Math.random() * 2000));
+        // Strictly sequential spacing (user request): the next part's
+        // Gemini request fires only after this part is answered AND
+        // filled/uploaded, plus a visible pause in between (storage
+        // geminiDelaySec, default 10s) so one run never bursts the
+        // key's rate limits.
+        const delayMs = await geminiInterRequestDelayMs();
+        if (delayMs > 0) {
+          progress.step(
+            `pace-${n}`,
+            `Nghỉ ${Math.round(delayMs / 1000)}s để giãn cách trước câu tiếp theo…`,
+            "info"
+          );
+          await sleep(delayMs);
+        }
       } else {
         await sleep(500);
       }
