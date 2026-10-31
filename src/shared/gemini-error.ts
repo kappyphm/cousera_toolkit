@@ -85,3 +85,21 @@ export function parseGeminiError(e: unknown): GeminiErrorInfo {
 
   return { status, retryDelaySeconds, dailyQuota, retryable, summary };
 }
+
+/**
+ * Fallback models for daily-quota exhaustion. Free-tier quotas are
+ * PER MODEL (GenerateRequestsPerDayPerProjectPerModel), so when one
+ * model burns its 20/day, the others still have theirs. Order follows
+ * the prototype metadata.json modelList (analysis/v3/01 §4).
+ */
+export const FALLBACK_MODELS = [
+  "gemini-3.1-flash-lite",
+  "gemini-2.5-flash-lite",
+  "gemini-2.5-flash",
+  "gemma-4-31b-it"
+] as const;
+
+/** Candidate order: the selected model first, then every fallback. */
+export function modelCandidates(primary: string): string[] {
+  return [primary, ...FALLBACK_MODELS.filter((m) => m !== primary)];
+}
