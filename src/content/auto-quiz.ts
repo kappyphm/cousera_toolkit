@@ -21,9 +21,8 @@
 //  3. `Yc` is reconstructed from the decoded essence in v3/01 §4.
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import { sleep, waitForSelector } from "../shared/coursera.ts";
-import { modelCandidates, parseGeminiError } from "../shared/gemini-error.ts";
+import { parseGeminiError } from "../shared/gemini-error.ts";
 import { DEFAULT_MODEL, withGeminiRetry } from "../shared/gemini.ts";
-import { notifyUser } from "../shared/notify.ts";
 import { CloneError, createLogger } from "../shared/logger.ts";
 import { fillPlainInput } from "./editor-fill.ts";
 
@@ -123,9 +122,8 @@ const ANSWER_SCHEMA = {
  * back to metadata.modelList[0]; the clone does not call vendor config).
  */
 /**
- * Resolve the API key, then try models in candidate order — a model
- * whose DAILY quota is exhausted hands over to the next candidate
- * (quotas are per-model), everything else throws immediately.
+ * Resolve the API key + the ONE selected model (user decision
+ * 2026-10-31: no model switching anywhere), then solve in one batch.
  */
 async function solveWithGemini(containers: Element[]): Promise<QuizTerm[] | null> {
   const stored = await chrome.storage.local.get(["geminiAPI", "model"]);
@@ -137,29 +135,8 @@ async function solveWithGemini(containers: Element[]): Promise<QuizTerm[] | null
       step: "nD.key"
     });
   }
-  const primary = (stored?.model as string | undefined) ?? DEFAULT_MODEL;
-  const candidates = modelCandidates(primary);
-  let lastErr: unknown;
-  for (let i = 0; i < candidates.length; i++) {
-    const model = candidates[i] as string;
-    try {
-      return await solveWithModel(containers, apiKey, model);
-    } catch (e) {
-      lastErr = e;
-      const info = parseGeminiError(e);
-      if (!info.dailyQuota) throw e;
-      const next = candidates[i + 1];
-      if (next) {
-        log.warn("nD", `model ${model} daily quota exhausted — falling back to ${next}`);
-        notifyUser(`Model ${model} đã hết quota ngày — chuyển sang ${next}…`, "warn", 9000);
-      }
-    }
-  }
-  const info = parseGeminiError(lastErr);
-  throw new CloneError(
-    `Tất cả model đều đã hết quota ngày (đã thử: ${candidates.join(", ")}). ${info.summary}`,
-    { module: "auto-quiz", step: "nD.models", models: candidates }
-  );
+  const model = (stored?.model as string | undefined) ?? DEFAULT_MODEL;
+  return solveWithModel(containers, apiKey, model);
 }
 
 /** One batched solve attempt against a single model (nD body). */
@@ -188,14 +165,16 @@ async function solveWithModel(
             responseJsonSchema: ANSWER_SCHEMA
           }
         }),
-      { silentDailyQuota: true }
+      { model }
     );
     text = res.text ?? "";
   } catch (e) {
-    // A 429 already exhausted the retry layer — the prototype fallback
-    // (retry without thinkingConfig) exists for config incompatibility,
-    // not for quota; do not burn another call on a rate limit.
-    if (parseGeminiError(e).status === 429) throw e;
+    // A 429/500/503 already exhausted the retry layer — the prototype
+    // fallback (retry without thinkingConfig) exists for config
+    // incompatibility, not for quota/overload; do not burn another
+    // retry round on the same unusable model.
+    const st = parseGeminiError(e).status;
+    if (st === 429 || st === 500 || st === 503) throw e;
     log.warn("nD", "call with thinkingConfig failed — retrying without it (prototype fallback)", {
       error: (e as Error).message
     });
@@ -211,7 +190,7 @@ async function solveWithModel(
             responseJsonSchema: ANSWER_SCHEMA
           }
         }),
-      { silentDailyQuota: true }
+      { model }
     );
     text = res.text ?? "";
   }

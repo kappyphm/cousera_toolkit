@@ -8,7 +8,7 @@
 // module never clicks submit, never confirms dialogs, never chains
 // post-submit calls.
 import { sleep } from "../shared/coursera.ts";
-import { fetchGeminiAnswer, geminiInterRequestDelayMs } from "../shared/gemini.ts";
+import { fetchGeminiAnswersBatch } from "../shared/gemini.ts";
 import { CloneError, createLogger } from "../shared/logger.ts";
 import { fillEditor, fillPlainInput } from "./editor-fill.ts";
 import { attachAnswerFile } from "./file-upload.ts";
@@ -103,16 +103,17 @@ export async function handleTextAssignmentSubmit(): Promise<void> {
       ...fileParts.map((part): Job => ({ kind: "file", part }))
     ].sort((a, b) => a.part.index - b.part.index);
 
-    let done = 0;
-    for (const job of jobs) {
-      const n = job.part.index;
-      progress.step(`gemini-${n}`, `Đang gửi câu hỏi phần ${n}/${total} cho Gemini…`, "active");
-      const answer = await fetchGeminiAnswer({ question: buildQuestion(job.part) });
-      progress.step(
-        `gemini-${n}`,
-        `Đã nhận câu trả lời phần ${n}/${total} từ Gemini (${answer.length} ký tự)`,
-        "done"
-      );
+    // ONE Gemini call for the whole assignment (user request): answers
+    // come back as a batch, mapped by job position — the loop below
+    // only does local fill/upload work, no further API calls.
+    progress.step("gemini-all", `Đang gửi toàn bộ ${total} phần cho Gemini (1 lần gọi)…`, "active");
+    const answers = await fetchGeminiAnswersBatch(jobs.map((job) => buildQuestion(job.part)));
+    progress.step("gemini-all", `Đã nhận đủ ${answers.length} câu trả lời từ Gemini`, "done");
+
+    for (let ji = 0; ji < jobs.length; ji++) {
+      const job = jobs[ji] as Job;
+      const n = ji + 1;
+      const answer = answers[ji] as string;
       if (job.kind === "text") {
         progress.step(`fill-${n}`, `Đang điền đáp án vào phần ${n}/${total}…`, "active");
         await fillPart(job.part, answer);
@@ -122,25 +123,7 @@ export async function handleTextAssignmentSubmit(): Promise<void> {
         const fileName = await attachAnswerFile(job.part, answer);
         progress.step(`fill-${n}`, `Đã upload file ${fileName} cho phần ${n}/${total}`, "done");
       }
-      done++;
-      if (done < jobs.length) {
-        // Strictly sequential spacing (user request): the next part's
-        // Gemini request fires only after this part is answered AND
-        // filled/uploaded, plus a visible pause in between (storage
-        // geminiDelaySec, default 10s) so one run never bursts the
-        // key's rate limits.
-        const delayMs = await geminiInterRequestDelayMs();
-        if (delayMs > 0) {
-          progress.step(
-            `pace-${n}`,
-            `Nghỉ ${Math.round(delayMs / 1000)}s để giãn cách trước câu tiếp theo…`,
-            "info"
-          );
-          await sleep(delayMs);
-        }
-      } else {
-        await sleep(500);
-      }
+      await sleep(500);
     }
     log.info(
       "main",
