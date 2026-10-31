@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "manifest_version": 3,
   "action": {
-    "default_popup": "popup.html"
+    "default_title": "Coursera Toolkit — mở/đóng sidebar"
   },
   "background": {
     "service_worker": "assets/background.js",
