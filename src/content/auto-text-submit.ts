@@ -60,10 +60,19 @@ export async function handleTextAssignmentSubmit(): Promise<void> {
   try {
     await openAttemptForm();
     const parts = extractTextParts();
+    let idx = 0;
     for (const p of parts) {
       const answer = await fetchGeminiAnswer({ question: buildQuestion(p) });
       await fillPart(p, answer);
-      await sleep(500);
+      idx++;
+      if (idx < parts.length) {
+        // Pacing between Gemini calls (backlog #1): a random 3–5s gap
+        // between parts so rapid multi-part fills do not trip the
+        // per-minute rate limit.
+        await sleep(3000 + Math.floor(Math.random() * 2000));
+      } else {
+        await sleep(500);
+      }
     }
     log.info(
       "main",

@@ -5,9 +5,81 @@
 // instead of returning "Failed to fetch answer from Gemini." so callers never
 // fill garbage into the form.
 import { GoogleGenAI } from "@google/genai";
+import { sleep } from "./coursera.ts";
+import { formatDuration, parseGeminiError } from "./gemini-error.ts";
 import { CloneError, createLogger } from "./logger.ts";
+import { notifyUser } from "./notify.ts";
 
 const log = createLogger("gemini");
+
+// --- Rate-limit retry layer (backlog #1, approved plan) ----------------
+// Backoff 2/4/8/16/32s + jitter, server retryDelay respected when short,
+// daily-quota 429 fails fast. User toggle: storage.local `geminiAutoRetry`
+// (default ON), switchable in the popup.
+const RETRY_DELAYS_S = [2, 4, 8, 16, 32];
+/** A server delay longer than this is a quota window, not a rate limit. */
+const MAX_SERVER_DELAY_S = 90;
+
+export async function geminiAutoRetryEnabled(): Promise<boolean> {
+  try {
+    const s = await chrome.storage.local.get("geminiAutoRetry");
+    return (s?.geminiAutoRetry as boolean | undefined) ?? true;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Run a Gemini call with user-visible notifications + bounded retry.
+ * Rethrows the original error when: the toggle is off, the error is not
+ * retryable (incl. daily quota), the server demands a >90s wait, or the
+ * retries are exhausted.
+ */
+export async function withGeminiRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  const enabled = await geminiAutoRetryEnabled();
+  let retries = 0;
+  for (;;) {
+    try {
+      return await fn();
+    } catch (e) {
+      const info = parseGeminiError(e);
+      const giveUp =
+        !enabled || !info.retryable || retries >= RETRY_DELAYS_S.length;
+      if (giveUp) {
+        if (info.status === 429 || info.dailyQuota) {
+          notifyUser(
+            `${info.summary}. Đã dừng${
+              enabled ? "" : " (tự retry đang tắt)"
+            } — chi tiết trong console (F12).`,
+            "error",
+            15000
+          );
+        }
+        throw e;
+      }
+      let delayS = (RETRY_DELAYS_S[retries] as number) + Math.random();
+      if (info.retryDelaySeconds !== undefined) {
+        if (info.retryDelaySeconds > MAX_SERVER_DELAY_S) {
+          notifyUser(
+            `${info.summary} — server yêu cầu chờ ${formatDuration(info.retryDelaySeconds)}, không tự retry.`,
+            "error",
+            15000
+          );
+          throw e;
+        }
+        delayS = Math.max(delayS, Math.ceil(info.retryDelaySeconds));
+      }
+      retries++;
+      log.warn(label, `${info.summary} — retry ${retries}/${RETRY_DELAYS_S.length} sau ${delayS.toFixed(1)}s`);
+      notifyUser(
+        `${info.summary} — tự retry lần ${retries}/${RETRY_DELAYS_S.length} sau ${Math.round(delayS)}s…`,
+        "warn",
+        delayS * 1000 + 2000
+      );
+      await sleep(delayS * 1000);
+    }
+  }
+}
 
 /** Default model — prototype Cn(239). Overridable via storage `model`. */
 export const DEFAULT_MODEL = "gemini-2.5-flash";
@@ -47,14 +119,16 @@ export async function fetchGeminiAnswer(req: GeminiRequest): Promise<string> {
   let text: string;
   try {
     const ai = new GoogleGenAI({ apiKey });
-    const res = await ai.models.generateContent({
-      model,
-      contents: JSON.stringify(req.question),
-      config: {
-        thinkingConfig: { includeThoughts: false },
-        systemInstruction: ASSIGNMENT_SYSTEM_INSTRUCTION
-      }
-    });
+    const res = await withGeminiRetry("jz", () =>
+      ai.models.generateContent({
+        model,
+        contents: JSON.stringify(req.question),
+        config: {
+          thinkingConfig: { includeThoughts: false },
+          systemInstruction: ASSIGNMENT_SYSTEM_INSTRUCTION
+        }
+      })
+    );
     text = res.text ?? "";
   } catch (e) {
     log.error("jz", "Gemini API Error:", { error: (e as Error).message });
