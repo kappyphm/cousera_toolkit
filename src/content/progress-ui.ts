@@ -20,6 +20,51 @@ let titleEl: HTMLSpanElement | null = null;
 const lines = new Map<string, HTMLLIElement>();
 let hideTimer: number | undefined;
 
+// --- State snapshot + subscribers (sidebar mirror) ----------------------
+// The floating panel stays the OSD surface; the sidebar renders the
+// SAME run state from this snapshot so both stay in sync.
+export interface ProgressStep {
+  id: string;
+  text: string;
+  state: StepState;
+}
+export interface ProgressSnapshot {
+  title: string;
+  status: "idle" | "running" | "done" | "error";
+  steps: ProgressStep[];
+}
+let snapshot: ProgressSnapshot = { title: "", status: "idle", steps: [] };
+const progressSubscribers = new Set<(s: ProgressSnapshot) => void>();
+
+export function subscribeProgress(fn: (s: ProgressSnapshot) => void): () => void {
+  progressSubscribers.add(fn);
+  fn(snapshot);
+  return () => {
+    progressSubscribers.delete(fn);
+  };
+}
+
+function publishProgress(): void {
+  for (const fn of progressSubscribers) {
+    try {
+      fn(snapshot);
+    } catch {
+      /* a broken UI subscriber must never break the run */
+    }
+  }
+}
+
+function recordStep(id: string, text: string, state: StepState): void {
+  const existing = snapshot.steps.find((s) => s.id === id);
+  if (existing) {
+    existing.text = text;
+    existing.state = state;
+  } else {
+    snapshot.steps.push({ id, text, state });
+  }
+  publishProgress();
+}
+
 function ensurePanel(title: string): boolean {
   try {
     if (panel && panel.isConnected) {
@@ -104,6 +149,8 @@ function upsertLine(id: string, text: string, state: StepState): void {
 export const progress = {
   /** Reset the panel and set its title. */
   start(title: string): void {
+    snapshot = { title, status: "running", steps: [] };
+    publishProgress();
     try {
       window.clearTimeout(hideTimer);
       if (panel) {
@@ -117,9 +164,13 @@ export const progress = {
     }
   },
   step(id: string, text: string, state: StepState = "active"): void {
+    recordStep(id, text, state);
     upsertLine(id, text, state);
   },
   finish(text: string): void {
+    recordStep("finish", text, "done");
+    snapshot = { ...snapshot, status: "done" };
+    publishProgress();
     upsertLine("finish", text, "done");
     if (titleEl) titleEl.textContent = "Coursera Toolkit — hoàn tất";
     try {
@@ -134,6 +185,9 @@ export const progress = {
     }
   },
   fail(text: string): void {
+    recordStep("fail", text, "error");
+    snapshot = { ...snapshot, status: "error" };
+    publishProgress();
     upsertLine("fail", text, "error");
     if (titleEl) titleEl.textContent = "Coursera Toolkit — có lỗi";
   }

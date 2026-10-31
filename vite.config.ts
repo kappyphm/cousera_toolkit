@@ -1,12 +1,12 @@
 import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
 import { viteStaticCopy } from "vite-plugin-static-copy";
 
-// MV3: content + background + popup are separate entries.
+// MV3: the background service worker is the only entry here. The
+// toolbar popup was retired in favor of the in-page sidebar, which
+// ships inside the content bundle (vite.content.config.ts).
 // No bundling tricks — keep 1:1 module mapping with prototype logic.
 export default defineConfig({
   plugins: [
-    react(),
     // Copy unpacked-extension statics so dist/ loads directly.
     viteStaticCopy({
       targets: [
@@ -20,7 +20,6 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       input: {
-        popup: "popup.html",
         background: "src/background/sw.ts"
       },
       output: {

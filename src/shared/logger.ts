@@ -28,6 +28,25 @@ function activeLevel(): LogLevel {
     : "info";
 }
 
+/** One emitted log line, for in-page UI subscribers (sidebar feed). */
+export interface LogEvent {
+  level: LogLevel;
+  module: string;
+  step: string;
+  message: string;
+  time: Date;
+}
+
+const logSubscribers = new Set<(e: LogEvent) => void>();
+
+/** Subscribe to every emitted log line; returns the unsubscribe fn. */
+export function subscribeLogs(fn: (e: LogEvent) => void): () => void {
+  logSubscribers.add(fn);
+  return () => {
+    logSubscribers.delete(fn);
+  };
+}
+
 function emit(level: LogLevel, ctx: LogContext, message: string) {
   if (LEVEL_ORDER[level] < LEVEL_ORDER[activeLevel()]) return;
   const line = `[${level}] ${ctx.module}.${ctx.step} ${message}`;
@@ -35,6 +54,22 @@ function emit(level: LogLevel, ctx: LogContext, message: string) {
   else if (level === "warn") console.warn(line, ctx);
   else if (level === "debug") console.debug(line, ctx);
   else console.info(line, ctx);
+  if (logSubscribers.size > 0) {
+    const event: LogEvent = {
+      level,
+      module: ctx.module,
+      step: ctx.step,
+      message,
+      time: new Date()
+    };
+    for (const fn of logSubscribers) {
+      try {
+        fn(event);
+      } catch {
+        /* a broken UI subscriber must never break logging */
+      }
+    }
+  }
 }
 
 export function createLogger(module: string) {
