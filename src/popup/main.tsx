@@ -10,16 +10,26 @@ function Popup() {
   // Prototype storage flag (x2 orchestration): chrome.storage.local
   // {isAutoSubmitQuiz} gates the quiz auto-submit chain.
   const [autoSubmitQuiz, setAutoSubmitQuiz] = React.useState(false);
+  // Rate-limit retry toggle: chrome.storage.local {geminiAutoRetry},
+  // default ON (see shared/gemini.ts withGeminiRetry).
+  const [autoRetry, setAutoRetry] = React.useState(true);
   React.useEffect(() => {
-    void chrome.storage.local.get(["geminiAPI", "model", "isAutoSubmitQuiz"]).then((s) => {
-      if (typeof s?.geminiAPI === "string") setGeminiKey(s.geminiAPI);
-      if (typeof s?.model === "string") setModel(s.model);
-      if (typeof s?.isAutoSubmitQuiz === "boolean") setAutoSubmitQuiz(s.isAutoSubmitQuiz);
-    });
+    void chrome.storage.local
+      .get(["geminiAPI", "model", "isAutoSubmitQuiz", "geminiAutoRetry"])
+      .then((s) => {
+        if (typeof s?.geminiAPI === "string") setGeminiKey(s.geminiAPI);
+        if (typeof s?.model === "string") setModel(s.model);
+        if (typeof s?.isAutoSubmitQuiz === "boolean") setAutoSubmitQuiz(s.isAutoSubmitQuiz);
+        if (typeof s?.geminiAutoRetry === "boolean") setAutoRetry(s.geminiAutoRetry);
+      });
   }, []);
   const saveAutoSubmitQuiz = async (checked: boolean) => {
     setAutoSubmitQuiz(checked);
     await chrome.storage.local.set({ isAutoSubmitQuiz: checked });
+  };
+  const saveAutoRetry = async (checked: boolean) => {
+    setAutoRetry(checked);
+    await chrome.storage.local.set({ geminiAutoRetry: checked });
   };
   const saveGemini = async () => {
     await chrome.storage.local.set({ geminiAPI: geminiKey, model });
@@ -100,6 +110,16 @@ function Popup() {
           style={{ width: "100%", margin: "4px 0" }}
         />
         <button onClick={() => void saveGemini()}>Save key</button>
+        <p style={{ margin: "6px 0 0", color: "#555", fontSize: 12 }}>
+          <label>
+            <input
+              type="checkbox"
+              checked={autoRetry}
+              onChange={(e) => void saveAutoRetry(e.target.checked)}
+            />{" "}
+            Tự retry khi Gemini rate limit (429)
+          </label>
+        </p>
       </div>
       <p>Status: {status}</p>
     </main>

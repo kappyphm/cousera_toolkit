@@ -21,7 +21,8 @@
 //  3. `Yc` is reconstructed from the decoded essence in v3/01 §4.
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import { sleep, waitForSelector } from "../shared/coursera.ts";
-import { DEFAULT_MODEL } from "../shared/gemini.ts";
+import { parseGeminiError } from "../shared/gemini-error.ts";
+import { DEFAULT_MODEL, withGeminiRetry } from "../shared/gemini.ts";
 import { CloneError, createLogger } from "../shared/logger.ts";
 import { fillPlainInput } from "./editor-fill.ts";
 
@@ -138,30 +139,38 @@ async function solveWithGemini(containers: Element[]): Promise<QuizTerm[] | null
   const contents = JSON.stringify(terms);
   let text: string;
   try {
-    const res = await ai.models.generateContent({
-      model,
-      contents,
-      config: {
-        thinkingConfig: { includeThoughts: false, thinkingLevel: ThinkingLevel.MINIMAL },
-        responseMimeType: "application/json",
-        systemInstruction: YC_SYSTEM_INSTRUCTION,
-        responseJsonSchema: ANSWER_SCHEMA
-      }
-    });
+    const res = await withGeminiRetry("nD", () =>
+      ai.models.generateContent({
+        model,
+        contents,
+        config: {
+          thinkingConfig: { includeThoughts: false, thinkingLevel: ThinkingLevel.MINIMAL },
+          responseMimeType: "application/json",
+          systemInstruction: YC_SYSTEM_INSTRUCTION,
+          responseJsonSchema: ANSWER_SCHEMA
+        }
+      })
+    );
     text = res.text ?? "";
   } catch (e) {
+    // A 429 already exhausted the retry layer — the prototype fallback
+    // (retry without thinkingConfig) exists for config incompatibility,
+    // not for quota; do not burn another call on a rate limit.
+    if (parseGeminiError(e).status === 429) throw e;
     log.warn("nD", "call with thinkingConfig failed — retrying without it (prototype fallback)", {
       error: (e as Error).message
     });
-    const res = await ai.models.generateContent({
-      model,
-      contents,
-      config: {
-        responseMimeType: "application/json",
-        systemInstruction: YC_SYSTEM_INSTRUCTION,
-        responseJsonSchema: ANSWER_SCHEMA
-      }
-    });
+    const res = await withGeminiRetry("nD.noThinking", () =>
+      ai.models.generateContent({
+        model,
+        contents,
+        config: {
+          responseMimeType: "application/json",
+          systemInstruction: YC_SYSTEM_INSTRUCTION,
+          responseJsonSchema: ANSWER_SCHEMA
+        }
+      })
+    );
     text = res.text ?? "";
   }
 
