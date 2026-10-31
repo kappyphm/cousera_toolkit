@@ -2,6 +2,7 @@
 // v2: submit assignment + request grading + AI text submit via Gemini).
 import { sleep } from "../shared/coursera.ts";
 import { createLogger } from "../shared/logger.ts";
+import { handleReview } from "./auto-peer-review.ts";
 import { handlePeerGradedAssignment } from "./auto-submit-assignment.ts";
 import { handleTextAssignmentSubmit } from "./auto-text-submit.ts";
 import { requestGradingByPeer } from "./request-grading-by-peer.ts";
@@ -48,6 +49,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     requestGradingByPeer()
       .then(() => sendResponse({ ok: true }))
       .catch((e: unknown) => fail("request-grading-by-peer", e, sendResponse));
+    return true;
+  }
+  if (action === "review-peers") {
+    handleReview()
+      .then(() => sendResponse({ ok: true }))
+      .catch((e: unknown) => fail("review-peers", e, sendResponse));
     return true;
   }
   if (action === "submit-text-assignment") {
