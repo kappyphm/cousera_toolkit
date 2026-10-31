@@ -162,7 +162,9 @@ export async function getUserId(): Promise<string> {
   }
   await chrome.storage.local.set({ userId: parsed.id });
   const email = parsed.email_address ?? parsed.email;
-  if (email) await chrome.storage.sync.set({ email });
+  // Prototype keeps email in storage.local (the /check body reads
+  // {profileconsent, CAUTH, email} from chrome.storage.local).
+  if (email) await chrome.storage.local.set({ email });
   log.info("getUserId", `parsed id=${String(parsed.id)}`, {
     userId: String(parsed.id)
   });
@@ -229,7 +231,35 @@ export function csrfHeaders(extra: Record<string, string> = {}): Record<string, 
   };
 }
 
-/** POST helper with mandatory ok-check + logging (no silent failure). */
+/**
+ * Progress toast — the prototype CALLER renders a toast containing
+ * `<span id="progress">` (decoded style: border 1px solid #0356fc,
+ * position top-right) before running dD/vD, and the flow updates that
+ * span. The clone has no panel, so the content script creates the same
+ * element itself (F3 fix — previously the span never existed and every
+ * progress write went nowhere).
+ */
+export function showProgressToast(html: string): HTMLElement {
+  document.getElementById("clone-progress-toast")?.remove();
+  const el = document.createElement("div");
+  el.id = "clone-progress-toast";
+  el.setAttribute(
+    "style",
+    "position:fixed;top:16px;right:16px;z-index:99999;background:#fff;" +
+      "border:1px solid #0356fc;border-radius:8px;padding:10px 14px;" +
+      "font:14px system-ui;color:#111;box-shadow:0 4px 16px rgba(0,0,0,.18)"
+  );
+  el.innerHTML = html;
+  document.body.appendChild(el);
+  return el;
+}
+
+/**
+ * POST helper with logging. Prototype parity: the prototype helpers
+ * (`u()` and siblings) never check `res.ok` — an HTTP error status is
+ * logged here but does NOT throw; the flow continues exactly like the
+ * prototype. Only a network-level rejection propagates.
+ */
 export async function postJson<T = unknown>(
   module: string,
   step: string,
@@ -248,18 +278,13 @@ export async function postJson<T = unknown>(
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    log2.error(step, `POST failed status=${res.status}`, {
+    log2.error(step, `POST status=${res.status} (prototype: unchecked, flow continues)`, {
       ...ctx,
       status: res.status,
       ms: Math.round(performance.now() - started),
       body: text.slice(0, 500)
     });
-    throw new CloneError(`POST ${url} failed with ${res.status}`, {
-      module,
-      step,
-      status: res.status,
-      ...ctx
-    });
+    return { res, json: null };
   }
   // Prototype `u()` for CompletedItems (and siblings) ignores the response
   // body entirely — Coursera answers some POSTs with an HTML page (2xx).

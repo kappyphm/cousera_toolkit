@@ -21,7 +21,7 @@ interface PermissionsBody {
   linked?: {
     onDemandPeerSubmissionProgresses?: {
       "v1"?: Array<{
-        latestSubmissionSummary?: { computed?: { id?: string } };
+        latestSubmissionSummary?: { id?: string };
       }>;
     };
   };
@@ -72,34 +72,27 @@ export async function requestGradingByPeer(): Promise<void> {
     "/?fields=deleteSubmission%2ClistSubmissions%2CreviewPeers%2CviewReviewSchema%2CanonymousPeerReview%2ConDemandPeerSubmissionProgresses.v1(latestSubmissionSummary%2ClatestDraftSummary%2ClatestAttemptSummary)%2ConDemandPeerReceivedReviewProgresses.v1(evaluationIfReady%2CearliestCompletionTime%2CreviewCount%2CdefaultReceivedReviewRequiredCount)%2ConDemandPeerDisplayablePhaseSchedules.v1(currentPhase%2CphaseEnds%2CphaseStarts)&includes=receivedReviewsProgress%2CsubmissionProgress%2CphaseSchedule";
 
   log.info("d2", "GET PeerAssignmentPermissions", { branchId, courseId: meta.course_id, itemId: meta.item_id });
+  // Prototype: fetch(...).then(l => l.json()).then(chain) — NO res.ok check;
+  // a JSON parse failure rejects d2 exactly like the prototype chain does.
   const res = await fetch(permUrl, { method: "GET" });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new CloneError(`PeerAssignmentPermissions fetch failed status=${res.status}`, {
-      module: "request-grading-by-peer",
-      step: "permissions",
-      branchId,
-      courseId: meta.course_id,
-      itemId: meta.item_id,
-      status: res.status,
-      body: text.slice(0, 500)
-    });
-  }
   const body = (await res.json()) as PermissionsBody;
-  // Prototype chain: linked.onDemandPeerSubmissionProgresses.v1[0].latestSubmissionSummary.computed.id
+  // Prototype chain (decoded verbatim, analysis/v2/02 §2.2):
+  // linked.onDemandPeerSubmissionProgresses.v1[0].latestSubmissionSummary.id
+  // (F1 fix: an earlier clone build read `.computed.id`, which appears
+  // nowhere in the decoded prototype evidence.)
   const submissionId =
-    body?.linked?.onDemandPeerSubmissionProgresses?.["v1"]?.[0]?.latestSubmissionSummary?.computed?.id;
+    body?.linked?.onDemandPeerSubmissionProgresses?.["v1"]?.[0]?.latestSubmissionSummary?.id;
   if (!submissionId) {
-    throw new CloneError("latestSubmissionSummary.computed.id missing", {
-      module: "request-grading-by-peer",
-      step: "permissions",
+    // Prototype does not branch here: `a` is simply undefined and the
+    // mutation below is still sent (JSON.stringify drops the key).
+    log.error("d2", "latestSubmissionSummary.id missing — continuing like prototype", {
       branchId,
       courseId: meta.course_id,
       itemId: meta.item_id,
       linkedKeys: Object.keys(body?.linked ?? {})
     });
   }
-  log.info("d2", `submissionId=${submissionId}`, { branchId, courseId: meta.course_id });
+  log.info("d2", `submissionId=${String(submissionId)}`, { branchId, courseId: meta.course_id });
 
   // Vendor gate (clone noop).
   gate();
@@ -121,25 +114,28 @@ export async function requestGradingByPeer(): Promise<void> {
     }
   ];
   log.info("d2", "POST RequestGradingByPeer", { branchId, courseId: meta.course_id, submissionId });
-  const gqlRes = await fetch(gqlUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(gqlBody)
-  });
-  if (gqlRes.status === 200) {
-    log.info("d2", "mutation ok — reloading");
-    location.reload();
-  } else {
-    const text = await gqlRes.text().catch(() => "");
-    log.error("d2", `mutation failed status=${gqlRes.status}`, {
-      status: gqlRes.status,
-      body: text.slice(0, 500)
+  // Prototype: fetch(...).then(l => { if (l.status === 200) location.reload() })
+  // .catch(l => console.log(l)) — non-200 is silent, network errors are
+  // only logged. No throw (parity fix).
+  try {
+    const gqlRes = await fetch(gqlUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(gqlBody)
     });
-    throw new CloneError(`RequestGradingByPeer failed status=${gqlRes.status}`, {
-      module: "request-grading-by-peer",
-      step: "mutation",
-      status: gqlRes.status,
-      body: text.slice(0, 500)
+    if (gqlRes.status === 200) {
+      log.info("d2", "mutation ok — reloading");
+      location.reload();
+    } else {
+      const text = await gqlRes.text().catch(() => "");
+      log.error("d2", `mutation status=${gqlRes.status} (prototype: silent, no reload)`, {
+        status: gqlRes.status,
+        body: text.slice(0, 500)
+      });
+    }
+  } catch (e) {
+    log.error("d2", "mutation fetch failed (prototype: console.log only)", {
+      error: (e as Error).message
     });
   }
 }
