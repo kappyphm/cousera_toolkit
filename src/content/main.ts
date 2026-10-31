@@ -3,6 +3,7 @@
 import { sleep } from "../shared/coursera.ts";
 import { createLogger } from "../shared/logger.ts";
 import { handleReview } from "./auto-peer-review.ts";
+import { handleAutoquiz } from "./auto-quiz.ts";
 import { handlePeerGradedAssignment } from "./auto-submit-assignment.ts";
 import { handleTextAssignmentSubmit } from "./auto-text-submit.ts";
 import { requestGradingByPeer } from "./request-grading-by-peer.ts";
@@ -49,6 +50,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     requestGradingByPeer()
       .then(() => sendResponse({ ok: true }))
       .catch((e: unknown) => fail("request-grading-by-peer", e, sendResponse));
+    return true;
+  }
+  if (action === "auto-quiz") {
+    handleAutoquiz()
+      .then(() => sendResponse({ ok: true }))
+      .catch((e: unknown) => fail("auto-quiz", e, sendResponse));
     return true;
   }
   if (action === "review-peers") {
