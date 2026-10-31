@@ -29,6 +29,26 @@ export async function geminiAutoRetryEnabled(): Promise<boolean> {
   }
 }
 
+// --- Inter-request spacing (user request 2026-10-31) -------------------
+// Assignment runs are strictly sequential, but parts still fire Gemini
+// calls back-to-back; a configurable pause between parts keeps one run
+// from bursting the key's rate limits. Storage `geminiDelaySec`
+// (0 = off), default 10s, capped at 300s.
+export const DEFAULT_GEMINI_DELAY_SEC = 10;
+
+export async function geminiInterRequestDelayMs(): Promise<number> {
+  try {
+    const s = await chrome.storage.local.get("geminiDelaySec");
+    const v = s?.geminiDelaySec;
+    if (typeof v === "number" && Number.isFinite(v) && v >= 0) {
+      return Math.min(v, 300) * 1000;
+    }
+  } catch {
+    /* fall through to the default */
+  }
+  return DEFAULT_GEMINI_DELAY_SEC * 1000;
+}
+
 /**
  * Run a Gemini call with user-visible notifications + bounded retry.
  * Rethrows the original error when: the toggle is off, the error is not
