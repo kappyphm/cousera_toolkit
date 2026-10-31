@@ -5,7 +5,7 @@
 // the page discloses "AI Grading" (prototype hD gate).
 import { sleep, waitForSelector } from "../shared/coursera.ts";
 import { generateRandomWords } from "../shared/random.ts";
-import { CloneError, createLogger } from "../shared/logger.ts";
+import { createLogger } from "../shared/logger.ts";
 import { fillEditor, fillPlainInput } from "./editor-fill.ts";
 import { requestGradingByPeer } from "./request-grading-by-peer.ts";
 
@@ -152,13 +152,10 @@ export async function handlePeerGradedAssignment(): Promise<void> {
     log.info("mD", "handlePeerGradedAssignment — done");
   } catch (err) {
     // Prototype: console.error("Error handling peer-graded assignment:", err)
+    // — and nothing else: mD does NOT rethrow (parity fix; the caller's
+    // toast wrapper surfaces the failure in the prototype).
     log.error("mD", "Error handling peer-graded assignment:", {
       error: (err as Error).message
-    });
-    throw new CloneError(`handlePeerGradedAssignment failed: ${(err as Error).message}`, {
-      module: "auto-submit-assignment",
-      step: "main",
-      href: location.href
     });
   }
 }

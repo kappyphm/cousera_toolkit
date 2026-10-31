@@ -1,5 +1,6 @@
 // Content entry — message router (v1: video/reading + discussing;
 // v2: submit assignment + request grading + AI text submit via Gemini).
+import { sleep } from "../shared/coursera.ts";
 import { createLogger } from "../shared/logger.ts";
 import { handlePeerGradedAssignment } from "./auto-submit-assignment.ts";
 import { handleTextAssignmentSubmit } from "./auto-text-submit.ts";
@@ -19,8 +20,15 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   const action = m?.action;
   log.info("onMessage", `action=${String(action)}`);
   if (action === "skip-video-reading") {
+    // Caller parity (prototype, analysis/v1/01 §1): the caller awaits
+    // dD(), sleeps 1000ms, then reloads — the reload lives HERE, not
+    // inside resolveWeekMaterial.
     resolveWeekMaterial()
-      .then(() => sendResponse({ ok: true }))
+      .then(async () => {
+        sendResponse({ ok: true });
+        await sleep(1000);
+        window.location.reload();
+      })
       .catch((e: unknown) => fail("skip-video-reading", e, sendResponse));
     return true;
   }

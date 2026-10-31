@@ -1,13 +1,16 @@
 // 1:1 clone of prototype `dD as resolveWeekMaterial`.
 // Origin: prototype/assets/chunk-674d105d.js (~727970+), analysis/v1/01-skip-video-reading.md
 // Fidelity rules: same endpoints, same order, same bodies. No license gate
-// (prototype `Cr([])` replaced by explicit log). No silent catch — every
-// failure throws CloneError with courseId/itemId/status.
+// (prototype `Cr([])` replaced by explicit log). Error parity (audit đợt 1):
+// HTTP error statuses are logged, not thrown — the prototype checks almost
+// none of them; CloneError remains only where the prototype also stops
+// (e.g. missing videoId throw, waitForSelector timeout).
 import {
   csrfHeaders,
   getCourseMaterials,
   getUserId,
   postJson,
+  showProgressToast,
   sleep,
   type MaterialItem
 } from "../shared/coursera.ts";
@@ -90,9 +93,9 @@ async function markVideo(
     body: JSON.stringify({ viewedUpTo: B, videoProgressId: T })
   });
   if (!pRes.ok) {
+    // Prototype does not check this PUT's status — log and continue.
     const text = await pRes.text().catch(() => "");
-    throw new CloneError(`VideoProgresses PUT failed status=${pRes.status}`, {
-      module: "skip-video-reading", step: "markVideo.progress",
+    log.error("markVideo.progress", `PUT status=${pRes.status} (prototype: unchecked)`, {
       courseId, itemId, status: pRes.status, body: text.slice(0, 500)
     });
   }
@@ -146,22 +149,18 @@ async function getBranchId(courseId: string, userId: string): Promise<string> {
   const url =
     `https://www.coursera.org/api/learnerCourseSchedules.v1/${userId}~${courseId}/?fields=computationMetadata`;
   log.info("getBranchId", `GET ${url}`, { courseId, userId });
-  const res = await fetch(url);
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new CloneError(`learnerCourseSchedules failed status=${res.status}`, {
-      module: "skip-video-reading", step: "getBranchId",
-      courseId, status: res.status, body: text.slice(0, 500)
-    });
-  }
-  const body = (await res.json()) as {
+  // Prototype: fetch -> .json() -> elements[0].computationMetadata.branchId,
+  // no ok-check and no throw when the value is absent (it is simply
+  // undefined downstream). Parity: log and return "" instead of throwing.
+  const body = (await (await fetch(url)).json()) as {
     elements?: Array<{ computationMetadata?: { branchId?: string } }>;
   };
   const branchId = body?.elements?.[0]?.computationMetadata?.branchId;
   if (!branchId) {
-    throw new CloneError("missing branchId in schedules response", {
-      module: "skip-video-reading", step: "getBranchId", courseId
+    log.error("getBranchId", "missing branchId in schedules response (prototype: undefined, no throw)", {
+      courseId
     });
+    return "";
   }
   return branchId;
 }
@@ -220,21 +219,15 @@ async function markWidget(
     `https://www.coursera.org/api/onDemandSessionMemberships.v1?courseId=${courseId}` +
     `&userId=${userId}&q=activeByUserAndCourse&fields=id,createdAt,sessionId,userId`;
   log.info("markWidget.session", `GET ${listUrl}`, { courseId, itemId: item.id });
-  const res = await fetch(listUrl);
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new CloneError(`SessionMemberships failed status=${res.status}`, {
-      module: "skip-video-reading", step: "markWidget.session",
-      courseId, itemId: item.id, status: res.status, body: text.slice(0, 500)
-    });
-  }
-  const body = (await res.json()) as {
+  // Prototype (verbatim context, analysis/v1/01 §5): fetch -> .json() ->
+  // elements[0].sessionId, then PUT, then u(itemId). No ok-checks and no
+  // throw when sessionId is absent (undefined flows into the PUT body).
+  const body = (await (await fetch(listUrl)).json()) as {
     elements?: Array<{ sessionId?: string }>;
   };
   const sessionId = body?.elements?.[0]?.sessionId;
   if (!sessionId) {
-    throw new CloneError("missing sessionId in memberships response", {
-      module: "skip-video-reading", step: "markWidget.session",
+    log.error("markWidget.session", "missing sessionId (prototype: undefined, flow continues)", {
       courseId, itemId: item.id
     });
   }
@@ -248,8 +241,7 @@ async function markWidget(
   });
   if (!put.ok) {
     const text = await put.text().catch(() => "");
-    throw new CloneError(`WidgetProgress PUT failed status=${put.status}`, {
-      module: "skip-video-reading", step: "markWidget.progress",
+    log.error("markWidget.progress", `PUT status=${put.status} (prototype: unchecked)`, {
       courseId, itemId: item.id, status: put.status, body: text.slice(0, 500)
     });
   }
@@ -257,9 +249,13 @@ async function markWidget(
 }
 
 /**
- * 1:1 of `dD` minus vendor gate. `coachGraphqlDoc` is required only when the
- * course contains `coach` items; otherwise pass "" and coach items throw
- * explicitly instead of being silently skipped.
+ * 1:1 of `dD` minus vendor gate. `coachGraphqlDoc` is the bundled GraphQL
+ * document `cD` (prototype: decoded string f2(214), always present).
+ * F2 status: the doc text has not been extracted into this repo yet, so
+ * until it is, coach items are logged and SKIPPED without aborting the
+ * run (an earlier clone build threw here, which killed the whole
+ * Promise.all run — that failure mode exists in neither the prototype
+ * nor this build). Extracting cD from the bundle completes this branch.
  */
 export async function resolveWeekMaterial(
   onProgress?: (p: SkipProgress) => void,
@@ -275,6 +271,13 @@ export async function resolveWeekMaterial(
   log.info("resolve", `lectures=${lectures.length}/${data.length}`, {
     courseId, slug
   });
+  // F3: prototype caller shows the progress toast when lecture items
+  // exist — `<div>Progress: <span id="progress">0</span>/{total}</div>`.
+  if (lectures.length > 0) {
+    showProgressToast(
+      `<div>Progress: <span id="progress">0</span>/${lectures.length}</div>`
+    );
+  }
 
   let branchId = "";
   const needsBranch = data.some(
@@ -288,10 +291,12 @@ export async function resolveWeekMaterial(
       if (type === "supplement") await markSupplement(courseId, userId, w);
       else if (type === "coach") {
         if (!coachGraphqlDoc) {
-          throw new CloneError("coach item needs bundled GraphQL doc (cD)", {
-            module: "skip-video-reading", step: "runBranch",
+          // F2 stopgap (see resolveWeekMaterial doc): never abort the run
+          // over the not-yet-extracted cD document.
+          log.error("runBranch", "coach item skipped — bundled GraphQL doc cD not yet extracted", {
             courseId, itemId: w.id
           });
+          return;
         }
         await markCoach(userId, courseId, w, branchId, coachGraphqlDoc);
       } else if (type === "ungradedLti") await markLti(courseId, userId, w);
@@ -328,8 +333,7 @@ export async function resolveWeekMaterial(
   log.info("resolve", "Skip Videos & Readings Completed!", {
     courseId, slug, ms: Math.round(performance.now() - started)
   });
-  // Post-release UX (v1.0.0): mirror skip-discussing pattern — let the user
-  // see the page tick state, then reload so progress renders fresh.
-  await sleep(2000);
-  window.location.reload();
+  // Reload parity: in the prototype the CALLER reloads after dD resolves
+  // (await dD(); sleep(1000); location.reload()). The clone's caller is
+  // src/content/main.ts, which does exactly that — dD itself returns here.
 }
