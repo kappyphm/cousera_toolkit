@@ -21,8 +21,9 @@
 //  3. `Yc` is reconstructed from the decoded essence in v3/01 §4.
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import { sleep, waitForSelector } from "../shared/coursera.ts";
-import { parseGeminiError } from "../shared/gemini-error.ts";
+import { modelCandidates, parseGeminiError } from "../shared/gemini-error.ts";
 import { DEFAULT_MODEL, withGeminiRetry } from "../shared/gemini.ts";
+import { notifyUser } from "../shared/notify.ts";
 import { CloneError, createLogger } from "../shared/logger.ts";
 import { fillPlainInput } from "./editor-fill.ts";
 
@@ -121,6 +122,11 @@ const ANSWER_SCHEMA = {
  * in the fallback: storage.model ?? DEFAULT_MODEL (the prototype falls
  * back to metadata.modelList[0]; the clone does not call vendor config).
  */
+/**
+ * Resolve the API key, then try models in candidate order — a model
+ * whose DAILY quota is exhausted hands over to the next candidate
+ * (quotas are per-model), everything else throws immediately.
+ */
 async function solveWithGemini(containers: Element[]): Promise<QuizTerm[] | null> {
   const stored = await chrome.storage.local.get(["geminiAPI", "model"]);
   const apiKey = stored?.geminiAPI as string | undefined;
@@ -131,7 +137,37 @@ async function solveWithGemini(containers: Element[]): Promise<QuizTerm[] | null
       step: "nD.key"
     });
   }
-  const model = (stored?.model as string | undefined) ?? DEFAULT_MODEL;
+  const primary = (stored?.model as string | undefined) ?? DEFAULT_MODEL;
+  const candidates = modelCandidates(primary);
+  let lastErr: unknown;
+  for (let i = 0; i < candidates.length; i++) {
+    const model = candidates[i] as string;
+    try {
+      return await solveWithModel(containers, apiKey, model);
+    } catch (e) {
+      lastErr = e;
+      const info = parseGeminiError(e);
+      if (!info.dailyQuota) throw e;
+      const next = candidates[i + 1];
+      if (next) {
+        log.warn("nD", `model ${model} daily quota exhausted — falling back to ${next}`);
+        notifyUser(`Model ${model} đã hết quota ngày — chuyển sang ${next}…`, "warn", 9000);
+      }
+    }
+  }
+  const info = parseGeminiError(lastErr);
+  throw new CloneError(
+    `Tất cả model đều đã hết quota ngày (đã thử: ${candidates.join(", ")}). ${info.summary}`,
+    { module: "auto-quiz", step: "nD.models", models: candidates }
+  );
+}
+
+/** One batched solve attempt against a single model (nD body). */
+async function solveWithModel(
+  containers: Element[],
+  apiKey: string,
+  model: string
+): Promise<QuizTerm[] | null> {
   const terms = containers.map(buildTerm);
   log.info("nD", `solving ${terms.length} question(s) via Gemini`, { model });
 
@@ -139,17 +175,20 @@ async function solveWithGemini(containers: Element[]): Promise<QuizTerm[] | null
   const contents = JSON.stringify(terms);
   let text: string;
   try {
-    const res = await withGeminiRetry("nD", () =>
-      ai.models.generateContent({
-        model,
-        contents,
-        config: {
-          thinkingConfig: { includeThoughts: false, thinkingLevel: ThinkingLevel.MINIMAL },
-          responseMimeType: "application/json",
-          systemInstruction: YC_SYSTEM_INSTRUCTION,
-          responseJsonSchema: ANSWER_SCHEMA
-        }
-      })
+    const res = await withGeminiRetry(
+      "nD",
+      () =>
+        ai.models.generateContent({
+          model,
+          contents,
+          config: {
+            thinkingConfig: { includeThoughts: false, thinkingLevel: ThinkingLevel.MINIMAL },
+            responseMimeType: "application/json",
+            systemInstruction: YC_SYSTEM_INSTRUCTION,
+            responseJsonSchema: ANSWER_SCHEMA
+          }
+        }),
+      { silentDailyQuota: true }
     );
     text = res.text ?? "";
   } catch (e) {
@@ -160,16 +199,19 @@ async function solveWithGemini(containers: Element[]): Promise<QuizTerm[] | null
     log.warn("nD", "call with thinkingConfig failed — retrying without it (prototype fallback)", {
       error: (e as Error).message
     });
-    const res = await withGeminiRetry("nD.noThinking", () =>
-      ai.models.generateContent({
-        model,
-        contents,
-        config: {
-          responseMimeType: "application/json",
-          systemInstruction: YC_SYSTEM_INSTRUCTION,
-          responseJsonSchema: ANSWER_SCHEMA
-        }
-      })
+    const res = await withGeminiRetry(
+      "nD.noThinking",
+      () =>
+        ai.models.generateContent({
+          model,
+          contents,
+          config: {
+            responseMimeType: "application/json",
+            systemInstruction: YC_SYSTEM_INSTRUCTION,
+            responseJsonSchema: ANSWER_SCHEMA
+          }
+        }),
+      { silentDailyQuota: true }
     );
     text = res.text ?? "";
   }

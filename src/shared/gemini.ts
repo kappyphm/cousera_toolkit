@@ -6,7 +6,7 @@
 // fill garbage into the form.
 import { GoogleGenAI } from "@google/genai";
 import { sleep } from "./coursera.ts";
-import { formatDuration, parseGeminiError } from "./gemini-error.ts";
+import { formatDuration, modelCandidates, parseGeminiError } from "./gemini-error.ts";
 import { CloneError, createLogger } from "./logger.ts";
 import { notifyUser } from "./notify.ts";
 
@@ -35,7 +35,11 @@ export async function geminiAutoRetryEnabled(): Promise<boolean> {
  * retryable (incl. daily quota), the server demands a >90s wait, or the
  * retries are exhausted.
  */
-export async function withGeminiRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
+export async function withGeminiRetry<T>(
+  label: string,
+  fn: () => Promise<T>,
+  opts?: { silentDailyQuota?: boolean }
+): Promise<T> {
   const enabled = await geminiAutoRetryEnabled();
   let retries = 0;
   for (;;) {
@@ -46,7 +50,12 @@ export async function withGeminiRetry<T>(label: string, fn: () => Promise<T>): P
       const giveUp =
         !enabled || !info.retryable || retries >= RETRY_DELAYS_S.length;
       if (giveUp) {
-        if (info.status === 429 || info.dailyQuota) {
+        // With silentDailyQuota, a caller-level model fallback owns the
+        // notification — a "stopped" toast here would be wrong.
+        const notifyFinal =
+          (info.status === 429 || info.dailyQuota) &&
+          !(info.dailyQuota && opts?.silentDailyQuota);
+        if (notifyFinal) {
           notifyUser(
             `${info.summary}. Đã dừng${
               enabled ? "" : " (tự retry đang tắt)"
@@ -102,49 +111,88 @@ export interface GeminiRequest {
   question: string;
 }
 
-/** 1:1 of `jz` — fetch answer from Gemini with storage key. */
+/**
+ * 1:1 of `jz` — fetch answer from Gemini with storage key.
+ * Extension over the prototype: free-tier daily quotas are per-model,
+ * so when the selected model's daily quota is exhausted the call falls
+ * back through modelCandidates() (with a user-visible toast) instead of
+ * killing the whole run. Surfaced errors use the friendly summary from
+ * parseGeminiError, not the raw API JSON.
+ */
 export async function fetchGeminiAnswer(req: GeminiRequest): Promise<string> {
   log.info("jz", "Fetching answer from Gemini for question:", {
     preview: req.question.slice(0, 200)
   });
   const stored = await chrome.storage.local.get(["geminiAPI", "model"]);
   const apiKey = stored?.geminiAPI as string | undefined;
-  const model = (stored?.model as string | undefined) ?? DEFAULT_MODEL;
   if (!apiKey) {
     throw new CloneError("Gemini API key is missing in storage.", {
       module: "gemini",
       step: "key"
     });
   }
-  let text: string;
-  try {
-    const ai = new GoogleGenAI({ apiKey });
-    const res = await withGeminiRetry("jz", () =>
-      ai.models.generateContent({
-        model,
-        contents: JSON.stringify(req.question),
-        config: {
-          thinkingConfig: { includeThoughts: false },
-          systemInstruction: ASSIGNMENT_SYSTEM_INSTRUCTION
-        }
-      })
-    );
-    text = res.text ?? "";
-  } catch (e) {
-    log.error("jz", "Gemini API Error:", { error: (e as Error).message });
-    throw new CloneError(`Gemini API call failed: ${(e as Error).message}`, {
-      module: "gemini",
-      step: "generateContent",
-      model
-    });
+  const primary = (stored?.model as string | undefined) ?? DEFAULT_MODEL;
+  const candidates = modelCandidates(primary);
+  const ai = new GoogleGenAI({ apiKey });
+  let lastErr: unknown;
+  for (let i = 0; i < candidates.length; i++) {
+    const model = candidates[i] as string;
+    try {
+      const res = await withGeminiRetry(
+        "jz",
+        () =>
+          ai.models.generateContent({
+            model,
+            contents: JSON.stringify(req.question),
+            config: {
+              thinkingConfig: { includeThoughts: false },
+              systemInstruction: ASSIGNMENT_SYSTEM_INSTRUCTION
+            }
+          }),
+        { silentDailyQuota: true }
+      );
+      const text = res.text ?? "";
+      if (!text) {
+        throw new CloneError("No answer received", {
+          module: "gemini",
+          step: "generateContent",
+          model
+        });
+      }
+      log.info("jz", `answer received len=${text.length}`, { model });
+      return text;
+    } catch (e) {
+      if (e instanceof CloneError) throw e;
+      lastErr = e;
+      const info = parseGeminiError(e);
+      log.error("jz", "Gemini API Error:", { model, error: (e as Error).message });
+      if (!info.dailyQuota) {
+        throw new CloneError(
+          info.status === 429
+            ? info.summary
+            : `Gemini API call failed: ${(e as Error).message}`,
+          {
+            module: "gemini",
+            step: "generateContent",
+            model,
+            raw: (e as Error).message.slice(0, 300)
+          }
+        );
+      }
+      const next = candidates[i + 1];
+      if (next) {
+        log.warn("jz", `model ${model} daily quota exhausted — falling back to ${next}`);
+        notifyUser(
+          `Model ${model} đã hết quota ngày — chuyển sang ${next}…`,
+          "warn",
+          9000
+        );
+      }
+    }
   }
-  if (!text) {
-    throw new CloneError("No answer received", {
-      module: "gemini",
-      step: "generateContent",
-      model
-    });
-  }
-  log.info("jz", `answer received len=${text.length}`, { model });
-  return text;
+  const info = parseGeminiError(lastErr);
+  throw new CloneError(
+    `Tất cả model đều đã hết quota ngày (đã thử: ${candidates.join(", ")}). ${info.summary}`,
+    { module: "gemini", step: "generateContent", models: candidates }
+  );
 }
