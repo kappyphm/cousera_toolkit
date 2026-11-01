@@ -61,10 +61,20 @@ export function submissionIdFromPermissions(
 
 /** Compact shape digest of the submission-progress entry, for logs. */
 function describeEntry(body: PermissionsBody | null | undefined): string {
-  const entry = body?.linked?.onDemandPeerSubmissionProgresses?.["v1"]?.[0];
+  const v1: unknown = body?.linked?.onDemandPeerSubmissionProgresses?.["v1"];
+  const entry = Array.isArray(v1)
+    ? (v1[0] as SubmissionProgressEntry | null | undefined)
+    : undefined;
   if (!entry) {
+    // The container itself may have changed shape (not an array of
+    // entries anymore) — describe it so one log line settles that too.
+    const v1Desc = Array.isArray(v1)
+      ? `array(len=${v1.length})`
+      : v1 !== null && typeof v1 === "object"
+        ? `object(keys: ${Object.keys(v1).join(",") || "(none)"})`
+        : String(v1);
     const keys = Object.keys(body?.linked ?? {}).join(",");
-    return `linked keys: ${keys || "(none)"}; no v1[0] entry`;
+    return `linked keys: ${keys || "(none)"}; onDemandPeerSubmissionProgresses.v1=${v1Desc}; no v1[0] entry`;
   }
   return SUBMISSION_ID_SOURCES.map((s) => {
     const v = entry[s];
