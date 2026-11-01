@@ -6,8 +6,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createDom, loadFixture } from "./helpers.mjs";
-import { findBranchId } from "../src/content/request-grading-by-peer.ts";
-import { hasAiGrading } from "../src/content/auto-submit-assignment.ts";
+import { findBranchId } from "../src/content/features/request-peer-grading.ts";
+import { hasAiGrading } from "../src/content/features/submit-assignment.ts";
 
 const REVIEW_PAGE = "Submit_Your_Topic_and_Research_Questions___Coursera.html";
 const PAGE_URL = "https://www.coursera.org/learn/course/peer/x/submit";

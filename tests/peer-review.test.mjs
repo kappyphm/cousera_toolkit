@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadFixture, tick } from "./helpers.mjs";
-import { handleReview } from "../src/content/auto-peer-review.ts";
+import { handleReview } from "../src/content/features/peer-review.ts";
 
 test("handleReview grades the open review: spread rule, feedback, submit", async () => {
   const dom = loadFixture(

@@ -2,17 +2,17 @@
 // + discussing; v2: submit assignment + request grading + AI text
 // submit via Gemini; v3: the UI lives in the chrome.sidePanel page —
 // this script only runs actions and streams logs/progress to it).
-import { sleep } from "../shared/coursera.ts";
-import type { ToolkitEvent, ToolkitEventEnvelope } from "../shared/bridge.ts";
-import { createLogger, subscribeLogs } from "../shared/logger.ts";
-import { handleReview } from "./auto-peer-review.ts";
-import { handleAutoquiz } from "./auto-quiz.ts";
-import { handlePeerGradedAssignment } from "./auto-submit-assignment.ts";
-import { handleTextAssignmentSubmit } from "./auto-text-submit.ts";
-import { subscribeProgress } from "./progress-ui.ts";
-import { requestGradingByPeer } from "./request-grading-by-peer.ts";
-import { handleDiscussionPrompt } from "./skip-discussing.ts";
-import { resolveWeekMaterial } from "./skip-video-reading.ts";
+import { sleep } from "../platform/coursera-dom.ts";
+import type { ToolkitEvent, ToolkitEventEnvelope } from "../platform/bridge.ts";
+import { createLogger, subscribeLogs } from "../platform/logger.ts";
+import { handleReview } from "./features/peer-review.ts";
+import { handleAutoquiz } from "./features/auto-quiz.ts";
+import { handlePeerGradedAssignment } from "./features/submit-assignment.ts";
+import { handleTextAssignmentSubmit } from "./features/submit-text-assignment.ts";
+import { subscribeProgress } from "./progress.ts";
+import { requestGradingByPeer } from "./features/request-peer-grading.ts";
+import { handleDiscussionPrompt } from "./features/skip-discussing.ts";
+import { resolveWeekMaterial } from "./features/skip-video-reading.ts";
 
 const log = createLogger("content");
 

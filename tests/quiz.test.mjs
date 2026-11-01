@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadFixture } from "./helpers.mjs";
-import { buildTerm, findQuizContainers } from "../src/content/auto-quiz.ts";
+import { buildTerm, findQuizContainers } from "../src/content/features/auto-quiz.ts";
 
 const ATTEMPT_URL = "https://www.coursera.org/learn/course/quiz/attempt";
 

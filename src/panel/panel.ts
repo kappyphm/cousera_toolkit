@@ -6,11 +6,11 @@
 // out and log/progress/run-done events back. Gemini settings are
 // read/written directly in chrome.storage (same keys as always).
 
-import type { BgToPanel, LogWire } from "../shared/bridge.ts";
-import type { ProgressSnapshot } from "../content/progress-ui.ts";
+import type { BgToPanel, LogWire } from "../platform/bridge.ts";
+import type { ProgressSnapshot } from "../content/progress.ts";
 
 const MAX_LOG_ROWS = 150;
-// Matches DEFAULT_MODEL in shared/gemini.ts; duplicated as a literal
+// Matches DEFAULT_MODEL in platform/gemini.ts; duplicated as a literal
 // so the panel bundle does not pull in the Gemini SDK just for a
 // settings placeholder.
 const DEFAULT_MODEL_LABEL = "gemini-2.5-flash";
