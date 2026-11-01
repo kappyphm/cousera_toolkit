@@ -20,12 +20,18 @@
 //     editable is an inner textarea — the length==1 check stays on the
 //     wrapper (its textContent is still exactly 1 zero-width char),
 //     but focus must land on the inner textarea for insertText to work.
-//  5. Orchestration rewritten (issue #38) around the current UI: the
-//     hub is a separate entry page with three states, and reviews run
-//     as a conveyor on /review-next (same URL, counter on the page).
-//     The prototype's §4.2 click-through and §4.3/§4.4 loops target
-//     the old flow and cannot work there. Pd is untouched — it was
-//     verified live end-to-end on 2026-11-01 (counter 4 -> 3).
+//  5. Orchestration = the bundle's §4.1–§4.5 verbatim (restored
+//     2026-11-01 at the user's direction, issue #44 — supersedes the
+//     issue-#38 current-UI rewrite and the issue-#40 ready gate):
+//     guard, gate, §4.2 click-through, §4.3 URL-change loop, §4.4
+//     counter loop keyed on [data-testid="review-count"]. Nothing in
+//     the orchestration is adapted to the current UI: in the bundle's
+//     world the flow runs from a review page — entering the first
+//     review from the hub ("Start Reviewing") is a manual step, and
+//     §4.4's read-then-grade semantics (one extra grade after the
+//     counter text stops matching) are the bundle's own. Pd (point 4)
+//     is untouched — it was verified live end-to-end on 2026-11-01
+//     (counter 4 -> 3).
 import { sleep, waitForSelector } from "../../platform/coursera-dom.ts";
 import { findByText } from "../../platform/finder.ts";
 import { createLogger } from "../../platform/logger.ts";
@@ -136,187 +142,11 @@ async function gradeOnePeerItem(): Promise<void> {
   log.info("grade-one", "grade one peer item — done");
 }
 
-// ---------------------------------------------------------------------
-// Orchestration (issue #38) — replaces the prototype's §4.2 click-
-// through, §4.3 URL-change loop and §4.4 hub counter loop, which all
-// target the pre-2026 flow. Live evidence (2026-11-01, supervised on a
-// real account): the hub (/give-feedback) is a separate entry page
-// with three states — blocked ("Submit your project before reviewing
-// classmates" + a "Go to my project" link, no Start Reviewing button),
-// ready (counter + "Start Reviewing" at the page bottom) and complete
-// (counter at 0, Start Reviewing still offered for extra reviews).
-// Reviews themselves run as a conveyor on /review-next: submitting
-// loads the NEXT submission at the same URL with no success banner,
-// and the "N left to complete" counter is rendered on the review page
-// itself. So the loop below keys on the counter + form replacement,
-// never on URL changes or a return to the hub.
-// ---------------------------------------------------------------------
-
-export interface ReviewCounter {
-  left: number;
-  raw: string;
-}
-
-const LEFT_TO_COMPLETE_RE = /(\d+)\s+left to complete/i;
-const COMPLETE_COUNT_RE = /(\d+)\s+complete\b/i;
-const FINISHED_RE = /you(?:'|\u2019)ve finished your peer reviews/i;
-const BLOCKED_MARKER = "submit your project before reviewing";
-
-/**
- * Parse counter text. The complete forms ("N complete", the finished
- * banner) are only trusted on the hub — on a review page they could
- * appear in unrelated copy.
- */
-function parseCounterText(text: string, allowComplete: boolean): ReviewCounter | null {
-  const digits = text.match(LEFT_TO_COMPLETE_RE)?.[1];
-  if (digits) return { left: parseInt(digits, 10), raw: text };
-  if (allowComplete) {
-    if (FINISHED_RE.test(text)) return { left: 0, raw: text };
-    if (COMPLETE_COUNT_RE.test(text) && /review/i.test(text)) {
-      return { left: 0, raw: text };
-    }
-  }
-  return null;
-}
-
-/**
- * Read the review counter wherever the current UI renders it (the hub
- * AND /review-next both show it). Tier 1 is the prototype's §4.4
- * anchor [data-testid="review-count"]; tier 2 scans for the shortest
- * element whose text carries the counter — the visible text is the
- * stable contract confirmed live, the testid is not guaranteed.
- */
-export function readReviewCounter(): ReviewCounter | null {
-  const onHub = location.pathname.includes("/give-feedback");
-  const anchor = document.querySelector('[data-testid="review-count"]');
-  if (anchor) {
-    const parsed = parseCounterText((anchor.textContent ?? "").trim(), onHub);
-    if (parsed) {
-      log.debug("review", "counter via [data-testid=review-count]", { ...parsed });
-      return parsed;
-    }
-  }
-  let best: { len: number; counter: ReviewCounter } | null = null;
-  const candidates = document.querySelectorAll("div, span, p, h1, h2, h3, h4, li");
-  for (const el of Array.from(candidates)) {
-    const text = (el.textContent ?? "").trim().replace(/\s+/g, " ");
-    if (text.length === 0 || text.length > 90) continue;
-    let parsed = parseCounterText(text, onHub);
-    if (!parsed && onHub && COMPLETE_COUNT_RE.test(text)) {
-      // Bare "N complete": only a counter when a Reviews label sits in
-      // the same small container (the hub pairs the two).
-      const around = (el.parentElement?.textContent ?? "").trim().replace(/\s+/g, " ");
-      if (around.length <= 140 && /reviews/i.test(around)) {
-        parsed = { left: 0, raw: text };
-      }
-    }
-    if (parsed && (!best || text.length < best.len)) {
-      best = { len: text.length, counter: parsed };
-    }
-  }
-  if (best) log.debug("review", "counter via text scan", { ...best.counter });
-  return best?.counter ?? null;
-}
-
-export type ReviewPageState =
-  | { kind: "blocked" }
-  | { kind: "hub"; counter: ReviewCounter | null }
-  | { kind: "review"; counter: ReviewCounter | null }
-  | { kind: "other" };
-
-function hasReviewForm(): boolean {
-  return (
-    document.querySelector(
-      '[role="radiogroup"], .peer-option-input, div[data-testid="peer-review-multi-line-input-field"]'
-    ) !== null
-  );
-}
-
-function findStartReviewing(): HTMLElement | null {
-  return (
-    findByText<HTMLElement>("button", "Start Reviewing") ??
-    findByText<HTMLElement>("a", "Start Reviewing")
-  );
-}
-
-/** Classify the page the action was started on (logged at flow start). */
-export function inspectReviewPage(): ReviewPageState {
-  const counter = readReviewCounter();
-  if (location.pathname.includes("/give-feedback")) {
-    const bodyText = (document.body?.textContent ?? "").toLowerCase();
-    // Blocked = the banner is up AND there is no way to start (the
-    // banner sentence alone could appear in ready-state instructions).
-    if (bodyText.includes(BLOCKED_MARKER) && !findStartReviewing()) {
-      return { kind: "blocked" };
-    }
-    return { kind: "hub", counter };
-  }
-  if (
-    location.pathname.includes("/review-next") ||
-    location.pathname.includes("/review/") ||
-    hasReviewForm()
-  ) {
-    return { kind: "review", counter };
-  }
-  return { kind: "other" };
-}
-
-function scrollIntoViewSafe(el: HTMLElement): void {
-  if (typeof el.scrollIntoView === "function") el.scrollIntoView();
-}
-
-/** Poll for the review form after the hub's SPA navigation. */
-async function waitForReviewForm(timeoutMs: number): Promise<boolean> {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    if (hasReviewForm()) return true;
-    await sleep(250);
-  }
-  return hasReviewForm();
-}
-
-/** Identity of the displayed review form — its first rubric group. */
-function formSignature(): Element | null {
-  return document.querySelector('[role="radiogroup"], div[role="group"]');
-}
-
-/**
- * Wait until the conveyor advances after a submit: the counter drops
- * (or reaches 0), or the displayed form is replaced by a fresh,
- * unanswered one at the same URL.
- */
-async function waitForNextReview(
-  prev: { signature: Element | null; left: number },
-  timeoutMs: number
-): Promise<boolean> {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    const counter = readReviewCounter();
-    if (counter && counter.left < prev.left) return true;
-    const sig = formSignature();
-    if (sig && prev.signature && !prev.signature.isConnected) return true;
-    if (
-      sig &&
-      sig !== prev.signature &&
-      !sig.querySelector('input:checked, [aria-checked="true"]')
-    ) {
-      return true;
-    }
-    await sleep(500);
-  }
-  return false;
-}
-
-/**
- * Auto peer review (the panel's "Grading ..." action) — prototype `_D`
- * with the orchestration rewritten for the current UI (issue #38; see
- * the block comment above). The §4.1 guard and §4.5 gate are the
- * prototype's; Pd (gradeOnePeerItem) is the unchanged 1:1 port.
- */
+/** 1:1 of `_D` — auto peer review (the panel's "Grading ..." action). */
 export async function handleReview(): Promise<void> {
   log.info("review", "handleReview — start", { href: location.href });
 
-  // §4.1 Guard: location.pathname (note: pathname, not href) + alert.
+  // §4.1 Guard: location.pathname (note: pathname, not href) -> alert.
   if (!location.pathname.includes("/learn/")) {
     const msg = "This is not a course page, please go to your course page first";
     log.error("review", "guard failed — not /learn/", { href: location.href });
@@ -324,100 +154,52 @@ export async function handleReview(): Promise<void> {
     return;
   }
 
-  // §4.5 Vendor gate (clone noop; position per dD/vD pattern).
+  // §4.5 Vendor gate (clone noop; position per interpretation point 3).
   gate();
 
-  const state = inspectReviewPage();
-  const startCounter = "counter" in state ? state.counter : null;
-  log.info("review", "page state", {
-    kind: state.kind,
-    left: startCounter?.left ?? null,
-    href: location.href
-  });
+  // §4.2 Open course link — three se() clicks, errors ignored, with
+  // the decoded sleep(1000) between the first and the rest.
+  // Fire-and-forget .then(click).catch(() => {}) as in the bundle.
+  void waitForSelector<HTMLElement>('button[data-js="open-course-link"]', 1000)
+    .then((r) => r.click())
+    .catch(() => {});
+  await sleep(1000);
+  void waitForSelector<HTMLElement>('button[data-js="open-course-link"]', 1000)
+    .then((r) => r.click())
+    .catch(() => {});
+  void waitForSelector<HTMLElement>(".css-2imjyh .css-7jkbgo a", 1000)
+    .then((r) => r.click())
+    .catch(() => {});
 
-  if (state.kind === "blocked") {
-    log.warn(
-      "review",
-      'hub blocked: "Submit your project before reviewing classmates" — submit your own assignment first, then run again'
-    );
-    return;
-  }
-  if (state.kind === "other") {
-    log.warn(
-      "review",
-      "not a give-feedback hub or a review page — open the assignment's peer-review page and run again"
-    );
-    return;
-  }
-
-  if (state.kind === "hub") {
-    if (state.counter?.left === 0) {
-      log.info("review", "peer reviews already complete — nothing to do");
-      return;
-    }
-    const startBtn = findStartReviewing();
-    if (!startBtn) {
-      log.warn("review", '"Start Reviewing" not found on the hub');
-      return;
-    }
-    // The button sits at the page bottom (live evidence 2026-11-01).
-    scrollIntoViewSafe(startBtn);
-    await sleep(300);
-    startBtn.click();
-    log.info("review", 'clicked "Start Reviewing" — waiting for the review page');
-    if (!(await waitForReviewForm(15000))) {
-      log.warn(
-        "review",
-        'review form did not appear after "Start Reviewing" — if the page reloaded, run the action again on the review page'
-      );
-      return;
-    }
+  // §4.3 /review/ page loop — grade, then continue only while the URL
+  // keeps changing; max 5 rounds.
+  if (location.href.includes("/review/")) {
+    let r = location.href;
+    let i = 0;
+    do {
+      await gradeOnePeerItem();
+      if (location.href !== r) {
+        i++;
+        r = location.href;
+      } else break;
+    } while (i < 5);
+    log.info("review", `/review/ loop ended after i=${i}`);
   }
 
-  // Conveyor loop. With no readable counter this is a legacy
-  // single-review page: grade it once and stop (the prototype's two
-  // loops used to grade such a page twice).
-  const first = readReviewCounter();
-  if (!first) {
+  // §4.4 "Left to complete" loop — the counter text is read BEFORE
+  // each Pd() (do-while), then Pd() + sleep(2000); the loop continues
+  // while the just-read text includes the marker. Verbatim bundle
+  // semantics: a page without [data-testid="review-count"] is graded
+  // exactly once, and one extra grade lands after the counter text
+  // stops matching (the read precedes the grade).
+  let t: string | undefined;
+  do {
+    t = await waitForSelector<HTMLElement>('[data-testid="review-count"]', 1000)
+      .then((r) => r.innerText)
+      .catch(() => undefined);
     await gradeOnePeerItem();
-    await sleep(2500); // let Pd's +700ms submit click land
-    log.info("review", "no counter on this page — graded the single open review");
-    log.info("review", "handleReview — done");
-    return;
-  }
+    await sleep(2000);
+  } while (t != null && t.includes("left to complete"));
 
-  let rounds = 0;
-  let staleRounds = 0;
-  let current = first;
-  const MAX_ROUNDS = 30; // hard safety cap; real hubs ask for ~4
-  while (current.left > 0 && rounds < MAX_ROUNDS) {
-    const signature = formSignature();
-    log.info("review", `round ${rounds + 1}: ${current.left} left to complete`);
-    await gradeOnePeerItem();
-    rounds++;
-    const moved = await waitForNextReview({ signature, left: current.left }, 25000);
-    const next = readReviewCounter();
-    if (!moved || !next) {
-      log.warn("review", "no next review appeared after submitting — stopping", {
-        left: next?.left ?? null
-      });
-      break;
-    }
-    if (next.left >= current.left) {
-      staleRounds++;
-      if (staleRounds >= 2) {
-        log.warn("review", "counter is not decreasing — stopping", { left: next.left });
-        break;
-      }
-    } else {
-      staleRounds = 0;
-    }
-    current = next;
-  }
-  if (rounds >= MAX_ROUNDS) {
-    log.warn("review", `safety cap of ${MAX_ROUNDS} rounds reached — stopping`);
-  }
-  log.info("review", `handleReview — done, graded ${rounds} review(s)`, {
-    left: current.left
-  });
+  log.info("review", "handleReview — done");
 }

@@ -34,9 +34,10 @@ test("handleReview grades the open review: spread rule, feedback, submit", async
 
   // Spread rule: both rubric groups are 2/1/0 and 2/0/0 -> spread 2 > 1
   // -> the LAST option of each group. The page carries no review
-  // counter, so the rewritten orchestration (issue #38) grades the
-  // single open review exactly once: 2 option clicks total. (The
-  // prototype's two loops graded such a page twice.)
+  // counter, so the bundle's two loops (restored verbatim, issue #44)
+  // grade it exactly twice: §4.3 once (URL never changes -> break) and
+  // §4.4 once (no [data-testid="review-count"] -> t undefined -> the
+  // do-while still runs its single pass): 2 groups x 2 passes = 4.
   const groups = [...doc.querySelectorAll('[role="radiogroup"]')];
   assert.equal(groups.length, 2);
   const lastOptions = groups.map((g) => {
@@ -44,7 +45,7 @@ test("handleReview grades the open review: spread rule, feedback, submit", async
     return x[x.length - 1];
   });
   const optionClicks = clicks.filter((el) => el.matches(".option-contents > div:nth-child(1)"));
-  assert.equal(optionClicks.length, 2);
+  assert.equal(optionClicks.length, 4);
   assert.ok(optionClicks.every((el) => lastOptions.includes(el)), "every pick is the last option");
 
   // Feedback: insertText fires with focus inside the wrapper's textarea.
