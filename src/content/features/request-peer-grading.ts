@@ -3,6 +3,15 @@
 // Guard /learn/ -> branchId from body script -> fg() metadata -> GET permissions
 // -> submissionId -> POST graphql-gateway RequestGradingByPeer (array envelope)
 // -> reload on 200. Vendor gate Cr() replaced by noop (clone has no license).
+//
+// Strict-parity restoration (issue #41, user direction 2026-11-01):
+// this file previously accumulated deviations that the bundle does
+// not have — a fallback branchId scan (issue #32), a nested linked
+// key, a flattened submissionId read, a guessed summary fallback and
+// a hard stop before the mutation. Live verification against
+// Coursera's real responses showed the bundle's own logic matches
+// today's API hop for hop; every deviation is removed below, and the
+// reads follow the raw decoded chain in analysis/v2/02 §2.1–§2.3.
 import { getMetadata } from "../../platform/coursera-api.ts";
 import { CloneError, createLogger } from "../../platform/logger.ts";
 
@@ -17,107 +26,58 @@ const MUTATION = `mutation RequestGradingByPeer($input: PeerReviewAi_RequestGrad
 }
 `;
 
+interface SummaryInner {
+  id?: string;
+}
+
 /**
- * A summary field in the live response is a WRAPPER object
- * { summary, computed } (verified from the panel digest, 2026-11-01:
- * latestSubmissionSummary={keys: summary,computed}) — there is no
- * direct .id on it; the referenced resource's data sits one hop
- * deeper, under one of the two keys.
+ * The summary fields of a submission-progress entry are WRAPPER
+ * objects in the live response (verified 2026-11-01):
+ * latestSubmissionSummary = { summary: {...}, computed: {...} }.
+ * The bundle reads through `summary`; `computed` is typed only
+ * because it is present in the payload.
  */
 interface SummaryWrapper {
-  summary?: Record<string, unknown> | null;
-  computed?: Record<string, unknown> | null;
+  summary: SummaryInner;
+  computed?: SummaryInner | null;
 }
 
 interface SubmissionProgressEntry {
-  itemId?: string;
-  id?: string;
-  userId?: number;
-  courseId?: string;
   latestSubmissionSummary?: SummaryWrapper | null;
-  latestAttemptSummary?: SummaryWrapper | null;
-  latestDraftSummary?: SummaryWrapper | null;
 }
 
 interface PermissionsBody {
-  errorCode?: string;
   linked?: {
-    // The API's linked key is the FLAT string including the version
-    // suffix — exactly what the prototype's decoder recorded
-    // (analysis/v2/02 §2.2: e(107) = "onDemandPeerSubmissionProgresses.v1").
-    // An earlier clone build nested it as
-    // linked.onDemandPeerSubmissionProgresses["v1"], a key that does
-    // not exist in the real response (verified live 2026-11-01), so
-    // the id read was undefined on every item.
+    // Flat key including the version suffix — the bundle's decoder
+    // records e(107) = "onDemandPeerSubmissionProgresses.v1", and
+    // the live response confirms the key is flat, not nested.
     "onDemandPeerSubmissionProgresses.v1"?: Array<SubmissionProgressEntry | null>;
   };
 }
 
-const SUMMARY_KEYS = [
-  "latestSubmissionSummary",
-  "latestAttemptSummary",
-  "latestDraftSummary"
-] as const;
-
-/** The two real keys of a summary wrapper, in resolution order. */
-const ID_HOPS = ["summary", "computed"] as const;
-
 /**
- * Submission id for the RequestGradingByPeer mutation. The
- * prototype's raw chain (analysis/v2/02 §2.2) has exactly TWO inner
- * hops after the entry — entry -> latestSubmissionSummary -> <hop>
- * -> .id — but the doc's decode labels for those hops contradict
- * each other (one is labelled "[0]", the other
- * ".latestSubmissionSummary"), and past clone builds each flattened
- * it differently (one read .computed.id; the F1 audit then read .id
- * directly). Live evidence (2026-11-01) fixes the shape: the
- * summary is a { summary, computed } wrapper. The extractor tries
- * the wrapper's two real keys in order and reports which one
- * supplied the id, so the choice is observable in the run log
- * rather than assumed; the failure digest prints both hops' ids.
+ * The bundle's submissionId read, hop for hop (raw chain in
+ * analysis/v2/02 §2.2): linked -> "onDemandPeerSubmissionProgresses.v1"
+ * -> [0] -> latestSubmissionSummary -> summary -> .id, with the
+ * bundle's own ==null guards — a missing linked/entry/summary yields
+ * undefined and the mutation is STILL sent (the bundle has no branch
+ * there). The analysis doc's one-line summary flattened the `summary`
+ * hop away; that flattening, plus a nested linked key, is what made
+ * every earlier clone build read undefined. One softening vs the
+ * bundle: a missing linked KEY yields undefined here where the
+ * bundle's unguarded [0] would throw — same visible outcome (no id),
+ * kept so the failure stays a readable log line.
  */
 export function submissionIdFromPermissions(
   body: PermissionsBody | null | undefined
-): { id: string; source: string } | null {
-  const entry = body?.linked?.["onDemandPeerSubmissionProgresses.v1"]?.[0];
-  const wrapper = entry?.latestSubmissionSummary;
-  if (!wrapper) return null;
-  for (const hop of ID_HOPS) {
-    const id = wrapper[hop]?.id;
-    if (typeof id === "string" && id.length > 0) {
-      return { id, source: `latestSubmissionSummary.${hop}` };
-    }
-  }
-  return null;
-}
-
-/** One summary wrapper's shape, one level deep (keys + id values). */
-function describeWrapper(w: SummaryWrapper | null | undefined): string {
-  if (w === undefined) return "absent";
-  if (w === null) return "null";
-  const parts = ID_HOPS.map((hop) => {
-    const sub = w[hop];
-    if (sub === undefined) return `${hop}=absent`;
-    if (sub === null) return `${hop}=null`;
-    const id = sub.id;
-    return `${hop}={keys: ${Object.keys(sub).join(",") || "(none)"}; id: ${
-      typeof id === "string" ? id : "absent"
-    }}`;
-  });
-  return `{${parts.join("; ")}}`;
-}
-
-/** Compact shape digest of the permissions response, for logs. */
-function describeEntry(body: PermissionsBody | null | undefined): string {
-  if (body?.errorCode) return `errorCode=${body.errorCode}`;
-  const entries = body?.linked?.["onDemandPeerSubmissionProgresses.v1"];
-  const entry = Array.isArray(entries) ? entries[0] : undefined;
-  if (!entry) {
-    const keys = Object.keys(body?.linked ?? {}).join(",");
-    return `linked keys: ${keys || "(none)"}; no submission-progress entry`;
-  }
-  const summaries = SUMMARY_KEYS.map((s) => `${s}=${describeWrapper(entry[s])}`).join("; ");
-  return `entry keys: ${Object.keys(entry).join(",")}; ${summaries}`;
+): string | undefined {
+  const linked = body?.linked;
+  if (linked == null) return undefined;
+  const entry = linked["onDemandPeerSubmissionProgresses.v1"]?.[0];
+  if (entry == null) return undefined;
+  const wrapper = entry.latestSubmissionSummary;
+  if (wrapper == null) return undefined;
+  return wrapper.summary.id;
 }
 
 /** Clone of prototype vendor gate `Cr as getSource` — no license check. */
@@ -128,26 +88,26 @@ function gate(): void {
 const BRANCH_PATTERN = /(\d+~[A-Za-z0-9-_]+)/;
 
 /**
- * branchId = the digits before "~" in the page's embedded branch
- * marker. Prototype reads exactly `body > script:nth-child(3)`; that
- * stays the primary path. Fallback (issue #32): if the marker script
- * is not at child 3 — its position depends on the page's other body
- * children — scan every script in the body with the same regex
- * before giving up.
+ * branchId — the bundle reads exactly `body > script:nth-child(3)`
+ * (analysis/v2/02 §2.1): a missing script element aborts the flow
+ * (the bundle throws reading the text of nothing — mirrored here as
+ * a CloneError), and a regex miss yields undefined, with which the
+ * flow CONTINUES (the permissions URL is built with it). The
+ * issue-#32 fallback scan over all body scripts was removed
+ * 2026-11-01 at the user's direction: strict prototype parity.
  */
 export function findBranchId(): string | undefined {
-  const primary =
-    (document.querySelector("body > script:nth-child(3)") as HTMLElement | null)?.innerText ?? "";
-  const hit = primary.match(BRANCH_PATTERN)?.[1];
-  if (hit) return hit.split("~")[0];
-  for (const s of Array.from(document.querySelectorAll("body script"))) {
-    const m = (s.textContent ?? "").match(BRANCH_PATTERN)?.[1];
-    if (m) {
-      log.warn("branchId", "primary script position missed — fallback scan found the marker");
-      return m.split("~")[0];
-    }
+  const el = document.querySelector(
+    "body > script:nth-child(3)"
+  ) as HTMLElement | null;
+  if (!el) {
+    throw new CloneError(
+      "branch marker script not found (body > script:nth-child(3))",
+      { module: "request-grading-by-peer", step: "branchId", href: location.href }
+    );
   }
-  return undefined;
+  const hit = el.innerText.match(BRANCH_PATTERN)?.[1];
+  return hit?.split("~")[0];
 }
 
 /** 1:1 of `d2` — force Coursera to route submission to human peer grading. */
@@ -165,16 +125,9 @@ export async function requestGradingByPeer(): Promise<void> {
 
   // branchId from the embedded branch marker (see findBranchId).
   const branchId = findBranchId();
-  if (!branchId) {
-    throw new CloneError("branchId not found in body script", {
-      module: "request-grading-by-peer",
-      step: "branchId",
-      href: location.href
-    });
-  }
 
   const meta = getMetadata();
-  log.info("request", `branchId=${branchId}`, {
+  log.info("request", `branchId=${String(branchId)}`, {
     courseId: meta.course_id,
     itemId: meta.item_id
   });
@@ -190,34 +143,13 @@ export async function requestGradingByPeer(): Promise<void> {
   // Prototype: fetch(...).then(l => l.json()).then(chain) — NO res.ok check;
   // a JSON parse failure rejects d2 exactly like the prototype chain does.
   const res = await fetch(permUrl, { method: "GET" });
-  log.info("request", `GET PeerAssignmentPermissions status=${res.status}`, {
-    status: res.status
-  });
   const body = (await res.json()) as PermissionsBody;
-  // Prototype chain (analysis/v2/02 §2.2): the raw bundle code hops
-  // entry -> latestSubmissionSummary -> <one more hop> -> .id. The
-  // doc's one-line summary flattened that last hop away, and past
-  // clone builds inherited the flattening (plus a nested linked key
-  // the live response disproved). See submissionIdFromPermissions
-  // for the live-verified wrapper shape.
-  const found = submissionIdFromPermissions(body);
-  if (!found) {
-    // The prototype sends the mutation anyway here (submissionId
-    // undefined, JSON.stringify drops the key -> a guaranteed 400).
-    // Stop with the response shape in the message instead (issue
-    // #41), so the panel log alone shows whether the GET was refused
-    // (errorCode) or the item simply has no submission summary.
-    throw new CloneError(
-      `no submission id in PeerAssignmentPermissions response (${describeEntry(body)})`,
-      { module: "request-grading-by-peer", step: "submissionId", href: location.href }
-    );
-  }
-  const submissionId = found.id;
-  log.info("request", `submissionId=${submissionId} (source: ${found.source})`, {
-    branchId,
-    courseId: meta.course_id,
-    source: found.source
-  });
+  log.debug("request", `GET status=${res.status}`, { status: res.status });
+  // Prototype chain (raw bundle code, analysis/v2/02 §2.2) — see
+  // submissionIdFromPermissions for the hop-by-hop mapping. Like the
+  // bundle, an undefined result does NOT stop the flow.
+  const submissionId = submissionIdFromPermissions(body);
+  log.info("request", `submissionId=${String(submissionId)}`, { branchId, courseId: meta.course_id });
 
   // Vendor gate (clone noop).
   gate();
@@ -253,9 +185,6 @@ export async function requestGradingByPeer(): Promise<void> {
       location.reload();
     } else {
       const text = await gqlRes.text().catch(() => "");
-      // Body excerpt in the message itself (issue #41): the panel's
-      // text log is what gets pasted for diagnosis, and the GraphQL
-      // error body names the exact rejected field.
       log.error(
         "request",
         `mutation status=${gqlRes.status} body=${text.slice(0, 200)} (prototype: silent, no reload)`,

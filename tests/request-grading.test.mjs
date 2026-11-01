@@ -1,14 +1,13 @@
-// d2 (request grading by peer) submission-id extraction (issue #41).
-// Shape history, all live-verified 2026-11-01:
-//  - The linked key is FLAT: linked["onDemandPeerSubmissionProgresses.v1"]
-//    (an earlier clone build nested it and read undefined everywhere).
-//  - An item with no submission returns an entry with only
-//    { itemId, id, userId, courseId } — no summaries at all.
-//  - An item WITH a submission returns summaries as WRAPPERS:
-//    latestSubmissionSummary = { summary: {...}, computed: {...} }
-//    (panel digest: "latestSubmissionSummary={keys: summary,computed}").
-//    The id sits one hop deeper, under summary or computed; the
-//    extractor tries both in order and reports the source.
+// d2 (request grading by peer) — strict prototype parity (issue #41,
+// user direction 2026-11-01). The bundle's read is a single exact
+// chain: linked["onDemandPeerSubmissionProgresses.v1"][0]
+//   .latestSubmissionSummary.summary.id
+// with ==null guards that yield undefined (and the mutation is still
+// sent). Live-verified shape history: the linked key is FLAT; an
+// item with no submission returns an entry with no summaries; an
+// item with a submission returns the summary as a { summary,
+// computed } WRAPPER. These tests pin the exact read — including
+// that computed.id is NOT used as a fallback (the bundle has none).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { submissionIdFromPermissions } from "../src/content/features/request-peer-grading.ts";
@@ -17,7 +16,7 @@ const wrap = (entry) => ({
   linked: { "onDemandPeerSubmissionProgresses.v1": [entry] }
 });
 
-test("reads the id from latestSubmissionSummary.summary", () => {
+test("reads latestSubmissionSummary.summary.id (the bundle's chain)", () => {
   const body = wrap({
     itemId: "item1",
     id: "111~course1~item1",
@@ -26,44 +25,22 @@ test("reads the id from latestSubmissionSummary.summary", () => {
     latestSubmissionSummary: {
       summary: { id: "sub-1", state: "submitted" },
       computed: { grade: 0 }
-    },
-    latestDraftSummary: { summary: {}, computed: {} }
+    }
   });
-  assert.deepEqual(submissionIdFromPermissions(body), {
-    id: "sub-1",
-    source: "latestSubmissionSummary.summary"
-  });
+  assert.equal(submissionIdFromPermissions(body), "sub-1");
 });
 
-test("falls back to latestSubmissionSummary.computed when summary has no id", () => {
+test("no fallback: computed.id alone does NOT yield an id", () => {
   const body = wrap({
     latestSubmissionSummary: {
       summary: { state: "submitted" },
       computed: { id: "sub-2" }
     }
   });
-  assert.deepEqual(submissionIdFromPermissions(body), {
-    id: "sub-2",
-    source: "latestSubmissionSummary.computed"
-  });
+  assert.equal(submissionIdFromPermissions(body), undefined);
 });
 
-test("null when neither hop of the wrapper carries an id", () => {
-  for (const wrapper of [
-    { summary: {}, computed: {} },
-    { summary: null, computed: null },
-    { summary: { id: "" }, computed: { id: 42 } },
-    {},
-    null
-  ]) {
-    assert.equal(
-      submissionIdFromPermissions(wrap({ latestSubmissionSummary: wrapper })),
-      null
-    );
-  }
-});
-
-test("null for the real no-submission entry shape (no summaries at all)", () => {
+test("undefined for the real no-submission entry shape (no summaries)", () => {
   // Verbatim structure of the live response captured 2026-11-01.
   const body = wrap({
     itemId: "gFDPY",
@@ -71,10 +48,10 @@ test("null for the real no-submission entry shape (no summaries at all)", () => 
     userId: 160106218,
     courseId: "A2RSXymKEeWJTQ5-ju9xSw"
   });
-  assert.equal(submissionIdFromPermissions(body), null);
+  assert.equal(submissionIdFromPermissions(body), undefined);
 });
 
-test("null for the old nested-key shape (the transcription bug)", () => {
+test("undefined for the old nested-key shape (a clone transcription bug)", () => {
   const body = {
     linked: {
       onDemandPeerSubmissionProgresses: {
@@ -82,10 +59,10 @@ test("null for the old nested-key shape (the transcription bug)", () => {
       }
     }
   };
-  assert.equal(submissionIdFromPermissions(body), null);
+  assert.equal(submissionIdFromPermissions(body), undefined);
 });
 
-test("null on error bodies and malformed responses, without throwing", () => {
+test("undefined on error bodies and malformed responses, without throwing", () => {
   for (const bad of [
     null,
     undefined,
@@ -93,8 +70,9 @@ test("null on error bodies and malformed responses, without throwing", () => {
     { errorCode: "Not Authorized", message: null, details: null },
     { linked: {} },
     { linked: { "onDemandPeerSubmissionProgresses.v1": [] } },
-    wrap(null)
+    wrap(null),
+    wrap({ latestSubmissionSummary: null })
   ]) {
-    assert.equal(submissionIdFromPermissions(bad), null);
+    assert.equal(submissionIdFromPermissions(bad), undefined);
   }
 });
