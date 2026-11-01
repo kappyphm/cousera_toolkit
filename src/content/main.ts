@@ -13,6 +13,7 @@ import { subscribeProgress } from "./progress.ts";
 import { requestGradingByPeer } from "./features/request-peer-grading.ts";
 import { handleDiscussionPrompt } from "./features/skip-discussing.ts";
 import { resolveWeekMaterial } from "./features/skip-video-reading.ts";
+import { createLauncher } from "./launcher.ts";
 
 const log = createLogger("content");
 
@@ -101,3 +102,7 @@ subscribeLogs((e) =>
 subscribeProgress((snapshot) => forward({ kind: "progress", snapshot }));
 
 onExecute();
+
+// Course-page launcher (issue #50): per-item buttons in the outline
+// that navigate + auto-run the matching flow via this same dispatch.
+createLauncher({ dispatch: runAction }).start();
