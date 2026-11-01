@@ -68,14 +68,32 @@ function findSubmitButton(): HTMLElement | null {
 async function gradeOnePeerItem(): Promise<void> {
   log.info("grade-one", "grade one peer item — start");
 
-  // §3.1 Review container wait (se rejects on timeout, like prototype).
-  // The decoded anchor (.css-2imjyh .css-7jkbgo a) no longer exists in
-  // the current UI; the union also accepts the new review form's own
-  // anchors so the wait resolves on either markup generation.
-  await waitForSelector(
-    '.css-2imjyh .css-7jkbgo a, .peer-option-input, div[data-testid="peer-review-multi-line-input-field"]',
-    1000
-  );
+  // §3.1 Review container wait. The decoded anchor (.css-2imjyh
+  // .css-7jkbgo a) no longer exists in the current UI; the union also
+  // accepts the new review form's own anchors so the wait resolves on
+  // either markup generation.
+  //
+  // INTERIM DEVIATION (issue #46, user-authorized 2026-11-01): the
+  // bundle's se() body was never decoded, so whether it rejects on
+  // timeout is unknown; the clone's waitForSelector does reject, and
+  // on a slow network that rejection killed Pd and the whole _D run.
+  // Until se() is extracted from the bundle, a timeout here skips
+  // this pass (the _D loops retry on their next pass) instead of
+  // throwing. Pd does NOT continue onto a half-loaded page: its §3.4
+  // submit timer could otherwise click Submit on a form that renders
+  // after the fill steps ran, posting an empty review.
+  try {
+    await waitForSelector(
+      '.css-2imjyh .css-7jkbgo a, .peer-option-input, div[data-testid="peer-review-multi-line-input-field"]',
+      1000
+    );
+  } catch {
+    log.warn(
+      "grade-one",
+      "review form not ready within 1000ms — skipping this pass (issue #46)"
+    );
+    return;
+  }
 
   // §3.2 Rubric group loop. Current UI groups options in
   // [role="radiogroup"] wrappers; div[role="group"] kept for old pages.

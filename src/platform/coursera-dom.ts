@@ -7,7 +7,15 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/** 1:1 of prototype `se` — poll querySelector, reject (never null) on timeout. */
+/**
+ * Reconstruction of the prototype's `se` wait helper — its body was
+ * never decoded (no analysis doc contains it), so the mechanics here
+ * (poll querySelector every 100ms, reject on timeout, 5000ms default)
+ * are the clone's own, NOT a verified port. Call sites pass the
+ * bundle's decoded timeout values. A call site that must survive a
+ * timeout catches the rejection itself (e.g. Pd §3.1, issue #46).
+ * Replace wholesale when se() is extracted from the bundle.
+ */
 export function waitForSelector<T extends Element = Element>(
   selector: string,
   timeoutMs = 5000

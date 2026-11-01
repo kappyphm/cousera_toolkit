@@ -67,3 +67,53 @@ test("§4.4: counter loop grades until the marker text is gone (bundle semantics
   assert.equal(inserts.length, 3, "one feedback fill per grade");
   assert.ok(inserts.every((i) => i.cmd === "insertText" && i.arg === "Good "));
 });
+
+test("§3.1 timeout skips the pass instead of killing the run (issue #46)", async () => {
+  // Slow network: the counter renders immediately but the review form
+  // only appears at +2600ms — after Pd's first §3.1 wait (1000ms) has
+  // already timed out. With the interim softening the run survives:
+  // pass 1 is skipped, later passes grade normally.
+  createDom(
+    `<!doctype html><html><body>
+       <div data-testid="review-count">1 left to complete</div>
+       <div id="form-slot"></div>
+     </body></html>`,
+    PAGE_URL
+  );
+  window.HTMLElement.prototype.scrollIntoView = function () {};
+
+  const inserts = [];
+  document.execCommand = (cmd, _ui, arg) => {
+    inserts.push({ cmd, arg });
+    return true;
+  };
+
+  let picks = 0;
+  let submits = 0;
+  document.addEventListener("click", (e) => {
+    const t = e.target;
+    if (t.closest?.(".opt")) picks++;
+    if (t.tagName === "BUTTON" && (t.textContent || "").trim() === "Submit Review") {
+      submits++;
+      setTimeout(() => {
+        document.querySelector('[data-testid="review-count"]').textContent = "1 complete";
+        document.getElementById("form-slot").innerHTML = formHtml();
+      }, 30);
+    }
+  });
+
+  // The form finishes rendering long after the first wait gave up.
+  setTimeout(() => {
+    document.getElementById("form-slot").innerHTML = formHtml();
+  }, 2600);
+
+  await handleReview(); // must RESOLVE — a rejection here is the old bug
+  await tick(100);
+
+  // Pass 1 skipped (nothing picked/filled/submitted into the void);
+  // pass 2 grades the one required review; pass 3 is §4.4's extra
+  // read-then-grade pass after the counter flips to "1 complete".
+  assert.equal(picks, 2);
+  assert.equal(inserts.length, 2);
+  assert.equal(submits, 2);
+});
