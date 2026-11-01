@@ -129,17 +129,27 @@ test("conveyor on /review-next grades exactly the remaining count, then stops", 
   const state = { left: 2, round: 1 };
   const dom = createDom(reviewPage(state.left, state.round), REVIEW_URL);
   const doc = dom.window.document;
+  let loadingPicks = 0;
   const { clicks, inserts } = instrument(dom, (el) => {
+    if (doc.querySelector("#loading") && el.dataset?.oid) loadingPicks++;
     if ((el.textContent || "").trim() !== "Submit Review") return;
-    state.left--;
-    state.round++;
-    doc.querySelector("#counter-text").textContent = `${state.left} left to complete`;
-    doc.querySelector("#slot").innerHTML =
-      state.left > 0 ? reviewForm(state.round) : `<div>All caught up</div>`;
+    // Post-submit loading window (issue #40, reported live): the form
+    // is torn down immediately; the next submission AND the counter
+    // drop only land ~1.2s later. The orchestration must wait this
+    // out instead of grading into the loading page.
+    doc.querySelector("#slot").innerHTML = `<div id="loading">Loading</div>`;
+    setTimeout(() => {
+      state.left--;
+      state.round++;
+      doc.querySelector("#counter-text").textContent = `${state.left} left to complete`;
+      doc.querySelector("#slot").innerHTML =
+        state.left > 0 ? reviewForm(state.round) : `<div>All caught up</div>`;
+    }, 1200);
   });
 
   await handleReview();
 
+  assert.equal(loadingPicks, 0, "no grading clicks during the loading window");
   assert.equal(submitsOf(clicks).length, 2);
   assert.deepEqual(picksOf(clicks), ["r1-g1-o3", "r1-g2-o1", "r2-g1-o3", "r2-g2-o1"]);
   assert.equal(inserts.length, 2);

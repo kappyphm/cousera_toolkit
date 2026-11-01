@@ -26,6 +26,10 @@
 //     The prototype's §4.2 click-through and §4.3/§4.4 loops target
 //     the old flow and cannot work there. Pd is untouched — it was
 //     verified live end-to-end on 2026-11-01 (counter 4 -> 3).
+//  6. Ready gate (issue #40): after each submit Coursera spends a
+//     while loading the next submission (form torn down / disabled);
+//     the orchestration waits for a settled, enabled form before
+//     every Pd run instead of scanning into the loading window.
 import { sleep, waitForSelector } from "../../platform/coursera-dom.ts";
 import { findByText } from "../../platform/finder.ts";
 import { createLogger } from "../../platform/logger.ts";
@@ -265,14 +269,47 @@ function scrollIntoViewSafe(el: HTMLElement): void {
   if (typeof el.scrollIntoView === "function") el.scrollIntoView();
 }
 
-/** Poll for the review form after the hub's SPA navigation. */
-async function waitForReviewForm(timeoutMs: number): Promise<boolean> {
+/** CDS buttons expose their disabled state via attribute or ARIA. */
+function isEnabled(el: HTMLElement): boolean {
+  return (
+    !el.hasAttribute("disabled") &&
+    (el as HTMLButtonElement).disabled !== true &&
+    el.getAttribute("aria-disabled") !== "true"
+  );
+}
+
+/**
+ * Wait until the displayed review form is actually usable (issue
+ * #40): present, its submit button enabled, and the SAME form still
+ * displayed after a settle interval. After a submit, Coursera tears
+ * the form down and loads the next submission for a while — grading
+ * into that window is what made runs fail. Returns "done" early when
+ * the counter reaches 0 (the completion state may render no form).
+ */
+async function waitForReviewReady(
+  timeoutMs: number
+): Promise<"ready" | "done" | "timeout"> {
   const started = Date.now();
+  let stableSig: Element | null = null;
+  let stableSince = 0;
   while (Date.now() - started < timeoutMs) {
-    if (hasReviewForm()) return true;
-    await sleep(250);
+    if (readReviewCounter()?.left === 0) return "done";
+    const sig = formSignature();
+    const btn = sig ? findSubmitButton() : null;
+    if (sig && btn && isEnabled(btn)) {
+      if (sig === stableSig) {
+        if (Date.now() - stableSince >= 600) return "ready";
+      } else {
+        stableSig = sig;
+        stableSince = Date.now();
+      }
+    } else {
+      stableSig = null;
+      stableSince = 0;
+    }
+    await sleep(300);
   }
-  return hasReviewForm();
+  return "timeout";
 }
 
 /** Identity of the displayed review form — its first rubric group. */
@@ -365,11 +402,16 @@ export async function handleReview(): Promise<void> {
     await sleep(300);
     startBtn.click();
     log.info("review", 'clicked "Start Reviewing" — waiting for the review page');
-    if (!(await waitForReviewForm(15000))) {
+    const gate = await waitForReviewReady(20000);
+    if (gate === "timeout") {
       log.warn(
         "review",
-        'review form did not appear after "Start Reviewing" — if the page reloaded, run the action again on the review page'
+        'review form did not become ready after "Start Reviewing" — if the page reloaded, run the action again on the review page'
       );
+      return;
+    }
+    if (gate === "done") {
+      log.info("review", "no reviews left to complete — done");
       return;
     }
   }
@@ -379,7 +421,20 @@ export async function handleReview(): Promise<void> {
   // loops used to grade such a page twice).
   const first = readReviewCounter();
   if (!first) {
-    await gradeOnePeerItem();
+    // Legacy single-review page — still wait for the form to be
+    // usable first (the run may start while the page is loading).
+    if ((await waitForReviewReady(20000)) !== "ready") {
+      log.warn("review", "review form never became ready — nothing graded");
+      return;
+    }
+    try {
+      await gradeOnePeerItem();
+    } catch (e) {
+      log.error("review", "grading the open review failed", {
+        error: (e as Error).message
+      });
+      return;
+    }
     await sleep(2500); // let Pd's +700ms submit click land
     log.info("review", "no counter on this page — graded the single open review");
     log.info("review", "handleReview — done");
@@ -388,31 +443,67 @@ export async function handleReview(): Promise<void> {
 
   let rounds = 0;
   let staleRounds = 0;
+  let lastSubmitLeft: number | null = null;
   let current = first;
   const MAX_ROUNDS = 30; // hard safety cap; real hubs ask for ~4
   while (current.left > 0 && rounds < MAX_ROUNDS) {
-    const signature = formSignature();
-    log.info("review", `round ${rounds + 1}: ${current.left} left to complete`);
-    await gradeOnePeerItem();
-    rounds++;
-    const moved = await waitForNextReview({ signature, left: current.left }, 25000);
-    const next = readReviewCounter();
-    if (!moved || !next) {
-      log.warn("review", "no next review appeared after submitting — stopping", {
-        left: next?.left ?? null
+    // Never grade into the post-submit loading window (issue #40):
+    // the next form must be present, enabled and settled first. The
+    // gate also watches the counter, so progress is judged on a read
+    // taken after the page settled — not mid-load.
+    const gate = await waitForReviewReady(30000);
+    if (gate === "done") {
+      const c = readReviewCounter();
+      if (c) current = c;
+      break;
+    }
+    if (gate === "timeout") {
+      log.warn("review", "review form did not become ready — stopping", {
+        left: current.left
       });
       break;
     }
-    if (next.left >= current.left) {
-      staleRounds++;
-      if (staleRounds >= 2) {
-        log.warn("review", "counter is not decreasing — stopping", { left: next.left });
+    const refreshed = readReviewCounter();
+    if (refreshed) {
+      if (refreshed.left === 0) {
+        current = refreshed;
         break;
       }
-    } else {
-      staleRounds = 0;
+      if (lastSubmitLeft !== null) {
+        if (refreshed.left >= lastSubmitLeft) {
+          staleRounds++;
+          if (staleRounds >= 2) {
+            log.warn("review", "counter is not decreasing — stopping", {
+              left: refreshed.left
+            });
+            break;
+          }
+        } else {
+          staleRounds = 0;
+        }
+      }
+      current = refreshed;
     }
-    current = next;
+    const signature = formSignature();
+    log.info("review", `round ${rounds + 1}: ${current.left} left to complete`);
+    try {
+      await gradeOnePeerItem();
+    } catch (e) {
+      log.error("review", "grading failed mid-run — stopping", {
+        error: (e as Error).message,
+        rounds
+      });
+      break;
+    }
+    rounds++;
+    lastSubmitLeft = current.left;
+    const moved = await waitForNextReview({ signature, left: current.left }, 25000);
+    if (!moved) {
+      log.warn("review", "no next review appeared after submitting — stopping", {
+        left: readReviewCounter()?.left ?? null
+      });
+      break;
+    }
   }
   if (rounds >= MAX_ROUNDS) {
     log.warn("review", `safety cap of ${MAX_ROUNDS} rounds reached — stopping`);
