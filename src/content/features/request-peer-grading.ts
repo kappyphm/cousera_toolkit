@@ -18,70 +18,67 @@ const MUTATION = `mutation RequestGradingByPeer($input: PeerReviewAi_RequestGrad
 `;
 
 interface SubmissionProgressEntry {
+  itemId?: string;
+  id?: string;
+  userId?: number;
+  courseId?: string;
   latestSubmissionSummary?: { id?: string } | null;
   latestAttemptSummary?: { id?: string } | null;
   latestDraftSummary?: { id?: string } | null;
 }
 
 interface PermissionsBody {
+  errorCode?: string;
   linked?: {
-    onDemandPeerSubmissionProgresses?: {
-      "v1"?: Array<SubmissionProgressEntry | null>;
-    };
+    // The API's linked key is the FLAT string including the version
+    // suffix — exactly what the prototype's decoder recorded
+    // (analysis/v2/02 §2.2: e(107) = "onDemandPeerSubmissionProgresses.v1").
+    // An earlier clone build nested it as
+    // linked.onDemandPeerSubmissionProgresses["v1"], a key that does
+    // not exist in the real response (verified live 2026-11-01), so
+    // the id read was undefined on every item.
+    "onDemandPeerSubmissionProgresses.v1"?: Array<SubmissionProgressEntry | null>;
   };
 }
 
-const SUBMISSION_ID_SOURCES = [
+const SUMMARY_KEYS = [
   "latestSubmissionSummary",
   "latestAttemptSummary",
   "latestDraftSummary"
 ] as const;
 
 /**
- * Submission id for the RequestGradingByPeer mutation. The prototype
- * reads ONLY latestSubmissionSummary.id (analysis/v2/02 §2.2), but on
- * the current API that summary comes back empty for an AI-graded
- * submission (live log 2026-11-01: id missing -> the mutation was
- * sent with submissionId undefined -> HTTP 400). Fallback (issue
- * #41): walk the other two summaries the prototype's own `fields`
- * projection already requests, in order; the returned source lets
- * the run log show which summary supplied the id.
+ * Submission id for the RequestGradingByPeer mutation — the
+ * prototype's exact read (analysis/v2/02 §2.2):
+ * linked["onDemandPeerSubmissionProgresses.v1"][0].latestSubmissionSummary.id
+ * Returns null when any hop is missing; an entry without summaries
+ * is real (verified live 2026-11-01 on an item with no submission:
+ * the entry carries only itemId/id/userId/courseId).
  */
 export function submissionIdFromPermissions(
   body: PermissionsBody | null | undefined
-): { id: string; source: (typeof SUBMISSION_ID_SOURCES)[number] } | null {
-  const entry = body?.linked?.onDemandPeerSubmissionProgresses?.["v1"]?.[0];
-  if (!entry) return null;
-  for (const source of SUBMISSION_ID_SOURCES) {
-    const id = entry[source]?.id;
-    if (typeof id === "string" && id.length > 0) return { id, source };
-  }
-  return null;
+): { id: string } | null {
+  const entry = body?.linked?.["onDemandPeerSubmissionProgresses.v1"]?.[0];
+  const id = entry?.latestSubmissionSummary?.id;
+  return typeof id === "string" && id.length > 0 ? { id } : null;
 }
 
-/** Compact shape digest of the submission-progress entry, for logs. */
+/** Compact shape digest of the permissions response, for logs. */
 function describeEntry(body: PermissionsBody | null | undefined): string {
-  const v1: unknown = body?.linked?.onDemandPeerSubmissionProgresses?.["v1"];
-  const entry = Array.isArray(v1)
-    ? (v1[0] as SubmissionProgressEntry | null | undefined)
-    : undefined;
+  if (body?.errorCode) return `errorCode=${body.errorCode}`;
+  const entries = body?.linked?.["onDemandPeerSubmissionProgresses.v1"];
+  const entry = Array.isArray(entries) ? entries[0] : undefined;
   if (!entry) {
-    // The container itself may have changed shape (not an array of
-    // entries anymore) — describe it so one log line settles that too.
-    const v1Desc = Array.isArray(v1)
-      ? `array(len=${v1.length})`
-      : v1 !== null && typeof v1 === "object"
-        ? `object(keys: ${Object.keys(v1).join(",") || "(none)"})`
-        : String(v1);
     const keys = Object.keys(body?.linked ?? {}).join(",");
-    return `linked keys: ${keys || "(none)"}; onDemandPeerSubmissionProgresses.v1=${v1Desc}; no v1[0] entry`;
+    return `linked keys: ${keys || "(none)"}; no submission-progress entry`;
   }
-  return SUBMISSION_ID_SOURCES.map((s) => {
+  const summaries = SUMMARY_KEYS.map((s) => {
     const v = entry[s];
     if (v === undefined) return `${s}=absent`;
     if (v === null) return `${s}=null`;
     return `${s}={keys: ${Object.keys(v).join(",") || "(none)"}}`;
   }).join("; ");
+  return `entry keys: ${Object.keys(entry).join(",")}; ${summaries}`;
 }
 
 /** Clone of prototype vendor gate `Cr as getSource` — no license check. */
@@ -159,26 +156,26 @@ export async function requestGradingByPeer(): Promise<void> {
   });
   const body = (await res.json()) as PermissionsBody;
   // Prototype chain (decoded verbatim, analysis/v2/02 §2.2):
-  // linked.onDemandPeerSubmissionProgresses.v1[0].latestSubmissionSummary.id
+  // linked["onDemandPeerSubmissionProgresses.v1"][0].latestSubmissionSummary.id
   // (F1 fix: an earlier clone build read `.computed.id`, which appears
-  // nowhere in the decoded prototype evidence.) Issue #41 adds the
-  // fallback walk + a hard stop — see submissionIdFromPermissions.
+  // nowhere in the decoded prototype evidence — and nested the linked
+  // key, which the live response disproved; see PermissionsBody.)
   const found = submissionIdFromPermissions(body);
   if (!found) {
     // The prototype sends the mutation anyway here (submissionId
     // undefined, JSON.stringify drops the key -> a guaranteed 400).
-    // Stop with the response shape in the message instead, so the
-    // next step is decidable from the panel log alone.
+    // Stop with the response shape in the message instead (issue
+    // #41), so the panel log alone shows whether the GET was refused
+    // (errorCode) or the item simply has no submission summary.
     throw new CloneError(
       `no submission id in PeerAssignmentPermissions response (${describeEntry(body)})`,
       { module: "request-grading-by-peer", step: "submissionId", href: location.href }
     );
   }
   const submissionId = found.id;
-  log.info("request", `submissionId=${submissionId} (source: ${found.source})`, {
+  log.info("request", `submissionId=${submissionId}`, {
     branchId,
-    courseId: meta.course_id,
-    source: found.source
+    courseId: meta.course_id
   });
 
   // Vendor gate (clone noop).
