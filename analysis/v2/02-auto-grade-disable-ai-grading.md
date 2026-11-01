@@ -67,6 +67,8 @@ Decoded:
 - `e(126)` = `.latestSubmissionSummary`
 - Result: `a = submissionId`
 
+> **Errata (2026-11-01, live-verified):** the `e(102)` / `e(126)` labels above contradict the raw code printed in this same section — the `[0]` there is a literal inside the `f` assignment, so `e(102)` is a property hop on the entry, not the array access. The real permissions response (item `mzs3a`, course `7Sx79iWNEeWs4gorU6Q1Yw`, fetched 2026-11-01) shows the entry's `latestSubmissionSummary` is a wrapper `{ summary, computed }`: `summary` = { isAnonymous, isLate, context, isDraft, isMentorGraded, title } with NO `id`; `computed` = { createdAt, isDeleted, creatorId, id } carries the submission id. Verified chain: `linked["onDemandPeerSubmissionProgresses.v1"][0].latestSubmissionSummary.computed.id` — i.e. `e(102)` = `latestSubmissionSummary`, `e(126)` = `computed`. The GraphQL side was also live-confirmed: with `submissionId` missing, the gateway answers 400 naming `submissionId` as a required field of the input type, so the operation and schema match the bundle.
+
 ### 2.3 Force peer grading — GraphQL
 
 Original mutation document (verbatim from `n.JpbYk`):

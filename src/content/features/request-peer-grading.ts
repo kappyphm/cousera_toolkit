@@ -32,10 +32,11 @@ interface SummaryInner {
 
 /**
  * The summary fields of a submission-progress entry are WRAPPER
- * objects in the live response (verified 2026-11-01):
- * latestSubmissionSummary = { summary: {...}, computed: {...} }.
- * The bundle reads through `summary`; `computed` is typed only
- * because it is present in the payload.
+ * objects in the live response (verified 2026-11-01 against the real
+ * permissions payload): latestSubmissionSummary = { summary, computed }
+ * where `summary` = { isAnonymous, isLate, context, isDraft,
+ * isMentorGraded, title } — NO id — and `computed` = { createdAt,
+ * isDeleted, creatorId, id }. The submission id lives in `computed`.
  */
 interface SummaryWrapper {
   summary: SummaryInner;
@@ -58,15 +59,25 @@ interface PermissionsBody {
 /**
  * The bundle's submissionId read, hop for hop (raw chain in
  * analysis/v2/02 §2.2): linked -> "onDemandPeerSubmissionProgresses.v1"
- * -> [0] -> latestSubmissionSummary -> summary -> .id, with the
- * bundle's own ==null guards — a missing linked/entry/summary yields
+ * -> [0] -> latestSubmissionSummary -> computed -> .id, with the
+ * bundle's own ==null guards — a missing linked/entry/wrapper yields
  * undefined and the mutation is STILL sent (the bundle has no branch
- * there). The analysis doc's one-line summary flattened the `summary`
- * hop away; that flattening, plus a nested linked key, is what made
- * every earlier clone build read undefined. One softening vs the
- * bundle: a missing linked KEY yields undefined here where the
- * bundle's unguarded [0] would throw — same visible outcome (no id),
- * kept so the failure stays a readable log line.
+ * there).
+ *
+ * The final hop is `computed`, pinned by LIVE evidence on
+ * 2026-11-01: the real permissions response for item mzs3a (the item
+ * whose 12:05 run returned submissionId=undefined from the previous
+ * build) carries latestSubmissionSummary.summary with NO id field
+ * and latestSubmissionSummary.computed.id as a 22-char string. The
+ * analysis doc's decode labels for the two inner hops (e(102) as
+ * "[0]", e(126) as ".latestSubmissionSummary") contradict the raw
+ * code printed above them in the same doc; the raw chain's hops are
+ * latestSubmissionSummary, then computed. An errata note is recorded
+ * in analysis/v2/02 §2.2.
+ *
+ * One softening vs the bundle: a missing linked KEY yields undefined
+ * here where the bundle's unguarded [0] would throw — same visible
+ * outcome (no id), kept so the failure stays a readable log line.
  */
 export function submissionIdFromPermissions(
   body: PermissionsBody | null | undefined
@@ -77,7 +88,8 @@ export function submissionIdFromPermissions(
   if (entry == null) return undefined;
   const wrapper = entry.latestSubmissionSummary;
   if (wrapper == null) return undefined;
-  return wrapper.summary.id;
+  if (wrapper.computed == null) return undefined;
+  return wrapper.computed.id;
 }
 
 /** Clone of prototype vendor gate `Cr as getSource` — no license check. */
