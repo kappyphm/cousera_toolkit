@@ -1,7 +1,11 @@
 // 1:1 of prototype `Ut as generateRandomString` @ 355936.
 // Draws random WORDS from the Vc dictionary (3702 entries, decoded from
 // table Ds base 156 rotation 984277) — not random characters.
-import WORDS from "./random-words.json";
+// The import attribute is inert for Vite/rolldown (the JSON is inlined
+// as before) but lets Node's type-stripping load this module in the
+// tests/ suite — without it, importing anything that transitively
+// imports random.ts fails under plain Node (issue #32).
+import WORDS from "./random-words.json" with { type: "json" };
 
 const Vc: readonly string[] = WORDS;
 
