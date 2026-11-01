@@ -33,8 +33,10 @@ test("handleReview grades the open review: spread rule, feedback, submit", async
   await tick(1000); // Pd's submit lands on a +700ms timer
 
   // Spread rule: both rubric groups are 2/1/0 and 2/0/0 -> spread 2 > 1
-  // -> the LAST option of each group. _D runs Pd twice on a static page
-  // (the /review/ loop + the left-to-complete loop), so 4 clicks total.
+  // -> the LAST option of each group. The page carries no review
+  // counter, so the rewritten orchestration (issue #38) grades the
+  // single open review exactly once: 2 option clicks total. (The
+  // prototype's two loops graded such a page twice.)
   const groups = [...doc.querySelectorAll('[role="radiogroup"]')];
   assert.equal(groups.length, 2);
   const lastOptions = groups.map((g) => {
@@ -42,7 +44,7 @@ test("handleReview grades the open review: spread rule, feedback, submit", async
     return x[x.length - 1];
   });
   const optionClicks = clicks.filter((el) => el.matches(".option-contents > div:nth-child(1)"));
-  assert.equal(optionClicks.length, 4);
+  assert.equal(optionClicks.length, 2);
   assert.ok(optionClicks.every((el) => lastOptions.includes(el)), "every pick is the last option");
 
   // Feedback: insertText fires with focus inside the wrapper's textarea.
