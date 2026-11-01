@@ -17,17 +17,30 @@ test("findBranchId: primary path on the real review page", () => {
   assert.equal(findBranchId(), "160106218");
 });
 
-test("findBranchId: fallback scan when the marker script moves off child 3", () => {
+test("findBranchId: no fallback — marker off child 3 aborts like the bundle", () => {
+  // The issue-#32 fallback scan was removed 2026-11-01 at the user's
+  // direction: the bundle reads body > script:nth-child(3) only. When
+  // that selector matches nothing, the bundle throws reading the
+  // missing script's text; the clone mirrors the abort (CloneError).
   const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
   const html = readFileSync(path.join(fixtures, REVIEW_PAGE), "utf8");
   // Shift every body child down by two so the marker script is no
-  // longer body > script:nth-child(3).
+  // longer body > script:nth-child(3) (child 3 is now another node).
   const mutated = html.replace(/<body[^>]*>/, "$&<div></div><div></div>");
   assert.notEqual(mutated, html);
   createDom(mutated, PAGE_URL);
-  const primary = document.querySelector("body > script:nth-child(3)")?.textContent ?? "";
-  assert.ok(!/(\d+~[A-Za-z0-9-_]+)/.test(primary), "primary position must miss in the mutated DOM");
-  assert.equal(findBranchId(), "160106218");
+  assert.equal(document.querySelector("body > script:nth-child(3)"), null);
+  assert.throws(() => findBranchId(), /branch marker script not found/);
+});
+
+test("findBranchId: script present but marker absent -> undefined, flow continues", () => {
+  // The bundle's regex-miss path: r == null -> branchId undefined,
+  // and d2 proceeds to build the permissions URL with it.
+  createDom(
+    `<!doctype html><html><body><div></div><div></div><script>var x = 1;</script></body></html>`,
+    PAGE_URL
+  );
+  assert.equal(findBranchId(), undefined);
 });
 
 test("hasAiGrading: Switch-to-peer-grading button is a certain positive", async () => {

@@ -3,6 +3,15 @@
 // Guard /learn/ -> branchId from body script -> fg() metadata -> GET permissions
 // -> submissionId -> POST graphql-gateway RequestGradingByPeer (array envelope)
 // -> reload on 200. Vendor gate Cr() replaced by noop (clone has no license).
+//
+// Strict-parity restoration (issue #41, user direction 2026-11-01):
+// this file previously accumulated deviations that the bundle does
+// not have — a fallback branchId scan (issue #32), a nested linked
+// key, a flattened submissionId read, a guessed summary fallback and
+// a hard stop before the mutation. Live verification against
+// Coursera's real responses showed the bundle's own logic matches
+// today's API hop for hop; every deviation is removed below, and the
+// reads follow the raw decoded chain in analysis/v2/02 §2.1–§2.3.
 import { getMetadata } from "../../platform/coursera-api.ts";
 import { CloneError, createLogger } from "../../platform/logger.ts";
 
@@ -17,14 +26,70 @@ const MUTATION = `mutation RequestGradingByPeer($input: PeerReviewAi_RequestGrad
 }
 `;
 
+interface SummaryInner {
+  id?: string;
+}
+
+/**
+ * The summary fields of a submission-progress entry are WRAPPER
+ * objects in the live response (verified 2026-11-01 against the real
+ * permissions payload): latestSubmissionSummary = { summary, computed }
+ * where `summary` = { isAnonymous, isLate, context, isDraft,
+ * isMentorGraded, title } — NO id — and `computed` = { createdAt,
+ * isDeleted, creatorId, id }. The submission id lives in `computed`.
+ */
+interface SummaryWrapper {
+  summary: SummaryInner;
+  computed?: SummaryInner | null;
+}
+
+interface SubmissionProgressEntry {
+  latestSubmissionSummary?: SummaryWrapper | null;
+}
+
 interface PermissionsBody {
   linked?: {
-    onDemandPeerSubmissionProgresses?: {
-      "v1"?: Array<{
-        latestSubmissionSummary?: { id?: string };
-      }>;
-    };
+    // Flat key including the version suffix — the bundle's decoder
+    // records e(107) = "onDemandPeerSubmissionProgresses.v1", and
+    // the live response confirms the key is flat, not nested.
+    "onDemandPeerSubmissionProgresses.v1"?: Array<SubmissionProgressEntry | null>;
   };
+}
+
+/**
+ * The bundle's submissionId read, hop for hop (raw chain in
+ * analysis/v2/02 §2.2): linked -> "onDemandPeerSubmissionProgresses.v1"
+ * -> [0] -> latestSubmissionSummary -> computed -> .id, with the
+ * bundle's own ==null guards — a missing linked/entry/wrapper yields
+ * undefined and the mutation is STILL sent (the bundle has no branch
+ * there).
+ *
+ * The final hop is `computed`, pinned by LIVE evidence on
+ * 2026-11-01: the real permissions response for item mzs3a (the item
+ * whose 12:05 run returned submissionId=undefined from the previous
+ * build) carries latestSubmissionSummary.summary with NO id field
+ * and latestSubmissionSummary.computed.id as a 22-char string. The
+ * analysis doc's decode labels for the two inner hops (e(102) as
+ * "[0]", e(126) as ".latestSubmissionSummary") contradict the raw
+ * code printed above them in the same doc; the raw chain's hops are
+ * latestSubmissionSummary, then computed. An errata note is recorded
+ * in analysis/v2/02 §2.2.
+ *
+ * One softening vs the bundle: a missing linked KEY yields undefined
+ * here where the bundle's unguarded [0] would throw — same visible
+ * outcome (no id), kept so the failure stays a readable log line.
+ */
+export function submissionIdFromPermissions(
+  body: PermissionsBody | null | undefined
+): string | undefined {
+  const linked = body?.linked;
+  if (linked == null) return undefined;
+  const entry = linked["onDemandPeerSubmissionProgresses.v1"]?.[0];
+  if (entry == null) return undefined;
+  const wrapper = entry.latestSubmissionSummary;
+  if (wrapper == null) return undefined;
+  if (wrapper.computed == null) return undefined;
+  return wrapper.computed.id;
 }
 
 /** Clone of prototype vendor gate `Cr as getSource` — no license check. */
@@ -35,26 +100,26 @@ function gate(): void {
 const BRANCH_PATTERN = /(\d+~[A-Za-z0-9-_]+)/;
 
 /**
- * branchId = the digits before "~" in the page's embedded branch
- * marker. Prototype reads exactly `body > script:nth-child(3)`; that
- * stays the primary path. Fallback (issue #32): if the marker script
- * is not at child 3 — its position depends on the page's other body
- * children — scan every script in the body with the same regex
- * before giving up.
+ * branchId — the bundle reads exactly `body > script:nth-child(3)`
+ * (analysis/v2/02 §2.1): a missing script element aborts the flow
+ * (the bundle throws reading the text of nothing — mirrored here as
+ * a CloneError), and a regex miss yields undefined, with which the
+ * flow CONTINUES (the permissions URL is built with it). The
+ * issue-#32 fallback scan over all body scripts was removed
+ * 2026-11-01 at the user's direction: strict prototype parity.
  */
 export function findBranchId(): string | undefined {
-  const primary =
-    (document.querySelector("body > script:nth-child(3)") as HTMLElement | null)?.innerText ?? "";
-  const hit = primary.match(BRANCH_PATTERN)?.[1];
-  if (hit) return hit.split("~")[0];
-  for (const s of Array.from(document.querySelectorAll("body script"))) {
-    const m = (s.textContent ?? "").match(BRANCH_PATTERN)?.[1];
-    if (m) {
-      log.warn("branchId", "primary script position missed — fallback scan found the marker");
-      return m.split("~")[0];
-    }
+  const el = document.querySelector(
+    "body > script:nth-child(3)"
+  ) as HTMLElement | null;
+  if (!el) {
+    throw new CloneError(
+      "branch marker script not found (body > script:nth-child(3))",
+      { module: "request-grading-by-peer", step: "branchId", href: location.href }
+    );
   }
-  return undefined;
+  const hit = el.innerText.match(BRANCH_PATTERN)?.[1];
+  return hit?.split("~")[0];
 }
 
 /** 1:1 of `d2` — force Coursera to route submission to human peer grading. */
@@ -72,16 +137,9 @@ export async function requestGradingByPeer(): Promise<void> {
 
   // branchId from the embedded branch marker (see findBranchId).
   const branchId = findBranchId();
-  if (!branchId) {
-    throw new CloneError("branchId not found in body script", {
-      module: "request-grading-by-peer",
-      step: "branchId",
-      href: location.href
-    });
-  }
 
   const meta = getMetadata();
-  log.info("request", `branchId=${branchId}`, {
+  log.info("request", `branchId=${String(branchId)}`, {
     courseId: meta.course_id,
     itemId: meta.item_id
   });
@@ -98,22 +156,11 @@ export async function requestGradingByPeer(): Promise<void> {
   // a JSON parse failure rejects d2 exactly like the prototype chain does.
   const res = await fetch(permUrl, { method: "GET" });
   const body = (await res.json()) as PermissionsBody;
-  // Prototype chain (decoded verbatim, analysis/v2/02 §2.2):
-  // linked.onDemandPeerSubmissionProgresses.v1[0].latestSubmissionSummary.id
-  // (F1 fix: an earlier clone build read `.computed.id`, which appears
-  // nowhere in the decoded prototype evidence.)
-  const submissionId =
-    body?.linked?.onDemandPeerSubmissionProgresses?.["v1"]?.[0]?.latestSubmissionSummary?.id;
-  if (!submissionId) {
-    // Prototype does not branch here: `a` is simply undefined and the
-    // mutation below is still sent (JSON.stringify drops the key).
-    log.error("request", "latestSubmissionSummary.id missing — continuing like prototype", {
-      branchId,
-      courseId: meta.course_id,
-      itemId: meta.item_id,
-      linkedKeys: Object.keys(body?.linked ?? {})
-    });
-  }
+  log.debug("request", `GET status=${res.status}`, { status: res.status });
+  // Prototype chain (raw bundle code, analysis/v2/02 §2.2) — see
+  // submissionIdFromPermissions for the hop-by-hop mapping. Like the
+  // bundle, an undefined result does NOT stop the flow.
+  const submissionId = submissionIdFromPermissions(body);
   log.info("request", `submissionId=${String(submissionId)}`, { branchId, courseId: meta.course_id });
 
   // Vendor gate (clone noop).
@@ -150,10 +197,11 @@ export async function requestGradingByPeer(): Promise<void> {
       location.reload();
     } else {
       const text = await gqlRes.text().catch(() => "");
-      log.error("request", `mutation status=${gqlRes.status} (prototype: silent, no reload)`, {
-        status: gqlRes.status,
-        body: text.slice(0, 500)
-      });
+      log.error(
+        "request",
+        `mutation status=${gqlRes.status} body=${text.slice(0, 200)} (prototype: silent, no reload)`,
+        { status: gqlRes.status, body: text.slice(0, 500) }
+      );
     }
   } catch (e) {
     log.error("request", "mutation fetch failed (prototype: console.log only)", {
