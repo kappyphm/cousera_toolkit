@@ -2,7 +2,7 @@
 // and the content scripts (issue #34). Everything crossing a context
 // boundary must stay structured-clone friendly: no Date objects (ISO
 // strings instead), no functions, no class instances.
-import type { ProgressSnapshot } from "../content/progress-ui.ts";
+import type { ProgressSnapshot } from "../content/progress.ts";
 import type { LogLevel } from "./logger.ts";
 
 /** One log line, serialized from the logger's LogEvent. */
@@ -16,7 +16,7 @@ export interface LogWire {
   time: string;
 }
 
-/** A progress snapshot from progress-ui's state store. */
+/** A progress snapshot from the progress state store (content/progress.ts). */
 export interface ProgressWire {
   kind: "progress";
   snapshot: ProgressSnapshot;

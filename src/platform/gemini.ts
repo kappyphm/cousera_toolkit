@@ -5,7 +5,7 @@
 // instead of returning "Failed to fetch answer from Gemini." so callers never
 // fill garbage into the form.
 import { GoogleGenAI } from "@google/genai";
-import { sleep } from "./coursera.ts";
+import { sleep } from "./coursera-dom.ts";
 import { formatDuration, parseGeminiError } from "./gemini-error.ts";
 import { CloneError, createLogger } from "./logger.ts";
 

@@ -9,8 +9,8 @@
 // never match the part-Submission_ prefix and are ignored by construction.
 // Their fake "I understand" button (data-action="acknowledge-guidelines") is
 // never clicked.
-import { sleep, waitForSelector } from "../shared/coursera.ts";
-import { CloneError, createLogger } from "../shared/logger.ts";
+import { sleep, waitForSelector } from "../../platform/coursera-dom.ts";
+import { CloneError, createLogger } from "../../platform/logger.ts";
 
 const log = createLogger("question-extract");
 

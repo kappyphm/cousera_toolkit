@@ -3,14 +3,9 @@
 // Same guards, cooldown, GET prompt -> POST co-content answer, pacing, reload.
 // No vendor gate. Error parity (audit đợt 1): guard/cooldown alert + return
 // like the prototype; the POST's HTTP status is logged, not thrown.
-import {
-  csrfToken,
-  getCourseMaterials,
-  getUserId,
-  showProgressToast,
-  sleep
-} from "../shared/coursera.ts";
-import { CloneError, createLogger } from "../shared/logger.ts";
+import { showProgressToast, sleep } from "../../platform/coursera-dom.ts";
+import { csrfToken, getCourseMaterials, getUserId } from "../../platform/coursera-api.ts";
+import { CloneError, createLogger } from "../../platform/logger.ts";
 
 const log = createLogger("skip-discussing");
 

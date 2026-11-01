@@ -3,10 +3,10 @@
 // Guard /learn/ -> branchId from body script -> fg() metadata -> GET permissions
 // -> submissionId -> POST graphql-gateway RequestGradingByPeer (array envelope)
 // -> reload on 200. Vendor gate Cr() replaced by noop (clone has no license).
-import { getMetadata } from "../shared/coursera.ts";
-import { CloneError, createLogger } from "../shared/logger.ts";
+import { getMetadata } from "../../platform/coursera-api.ts";
+import { CloneError, createLogger } from "../../platform/logger.ts";
 
-const log = createLogger("request-grading-by-peer");
+const log = createLogger("request-peer-grading");
 
 /** Exact mutation document from prototype `n.JpbYk` (verbatim). */
 const MUTATION = `mutation RequestGradingByPeer($input: PeerReviewAi_RequestGradingByPeerInput!) {
@@ -59,12 +59,12 @@ export function findBranchId(): string | undefined {
 
 /** 1:1 of `d2` — force Coursera to route submission to human peer grading. */
 export async function requestGradingByPeer(): Promise<void> {
-  log.info("d2", "requestGradingByPeer — start");
+  log.info("request", "requestGradingByPeer — start");
 
   // Guard: must be on a course page.
   if (!location.href.includes("/learn/")) {
     const msg = "This is not a course page, please go to your course page first";
-    log.error("d2", "guard failed — not /learn/", { href: location.href });
+    log.error("request", "guard failed — not /learn/", { href: location.href });
     // Prototype: alert(msg); return. Keep alert for parity.
     alert(msg);
     return;
@@ -81,7 +81,7 @@ export async function requestGradingByPeer(): Promise<void> {
   }
 
   const meta = getMetadata();
-  log.info("d2", `branchId=${branchId}`, {
+  log.info("request", `branchId=${branchId}`, {
     courseId: meta.course_id,
     itemId: meta.item_id
   });
@@ -93,7 +93,7 @@ export async function requestGradingByPeer(): Promise<void> {
     branchId + "~" + meta.course_id + "~" + meta.item_id +
     "/?fields=deleteSubmission%2ClistSubmissions%2CreviewPeers%2CviewReviewSchema%2CanonymousPeerReview%2ConDemandPeerSubmissionProgresses.v1(latestSubmissionSummary%2ClatestDraftSummary%2ClatestAttemptSummary)%2ConDemandPeerReceivedReviewProgresses.v1(evaluationIfReady%2CearliestCompletionTime%2CreviewCount%2CdefaultReceivedReviewRequiredCount)%2ConDemandPeerDisplayablePhaseSchedules.v1(currentPhase%2CphaseEnds%2CphaseStarts)&includes=receivedReviewsProgress%2CsubmissionProgress%2CphaseSchedule";
 
-  log.info("d2", "GET PeerAssignmentPermissions", { branchId, courseId: meta.course_id, itemId: meta.item_id });
+  log.info("request", "GET PeerAssignmentPermissions", { branchId, courseId: meta.course_id, itemId: meta.item_id });
   // Prototype: fetch(...).then(l => l.json()).then(chain) — NO res.ok check;
   // a JSON parse failure rejects d2 exactly like the prototype chain does.
   const res = await fetch(permUrl, { method: "GET" });
@@ -107,14 +107,14 @@ export async function requestGradingByPeer(): Promise<void> {
   if (!submissionId) {
     // Prototype does not branch here: `a` is simply undefined and the
     // mutation below is still sent (JSON.stringify drops the key).
-    log.error("d2", "latestSubmissionSummary.id missing — continuing like prototype", {
+    log.error("request", "latestSubmissionSummary.id missing — continuing like prototype", {
       branchId,
       courseId: meta.course_id,
       itemId: meta.item_id,
       linkedKeys: Object.keys(body?.linked ?? {})
     });
   }
-  log.info("d2", `submissionId=${String(submissionId)}`, { branchId, courseId: meta.course_id });
+  log.info("request", `submissionId=${String(submissionId)}`, { branchId, courseId: meta.course_id });
 
   // Vendor gate (clone noop).
   gate();
@@ -135,7 +135,7 @@ export async function requestGradingByPeer(): Promise<void> {
       query: MUTATION
     }
   ];
-  log.info("d2", "POST RequestGradingByPeer", { branchId, courseId: meta.course_id, submissionId });
+  log.info("request", "POST RequestGradingByPeer", { branchId, courseId: meta.course_id, submissionId });
   // Prototype: fetch(...).then(l => { if (l.status === 200) location.reload() })
   // .catch(l => console.log(l)) — non-200 is silent, network errors are
   // only logged. No throw (parity fix).
@@ -146,17 +146,17 @@ export async function requestGradingByPeer(): Promise<void> {
       body: JSON.stringify(gqlBody)
     });
     if (gqlRes.status === 200) {
-      log.info("d2", "mutation ok — reloading");
+      log.info("request", "mutation ok — reloading");
       location.reload();
     } else {
       const text = await gqlRes.text().catch(() => "");
-      log.error("d2", `mutation status=${gqlRes.status} (prototype: silent, no reload)`, {
+      log.error("request", `mutation status=${gqlRes.status} (prototype: silent, no reload)`, {
         status: gqlRes.status,
         body: text.slice(0, 500)
       });
     }
   } catch (e) {
-    log.error("d2", "mutation fetch failed (prototype: console.log only)", {
+    log.error("request", "mutation fetch failed (prototype: console.log only)", {
       error: (e as Error).message
     });
   }

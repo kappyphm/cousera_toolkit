@@ -20,11 +20,11 @@
 //     editable is an inner textarea — the length==1 check stays on the
 //     wrapper (its textContent is still exactly 1 zero-width char),
 //     but focus must land on the inner textarea for insertText to work.
-import { sleep, waitForSelector } from "../shared/coursera.ts";
-import { findByText } from "../shared/finder.ts";
-import { createLogger } from "../shared/logger.ts";
+import { sleep, waitForSelector } from "../../platform/coursera-dom.ts";
+import { findByText } from "../../platform/finder.ts";
+import { createLogger } from "../../platform/logger.ts";
 
-const log = createLogger("auto-peer-review");
+const log = createLogger("peer-review");
 
 /** Clone of prototype vendor gate `Cr as getSource` — no license check. */
 function gate(): void {
@@ -54,7 +54,7 @@ function findSubmitButton(): HTMLElement | null {
 
 /** 1:1 of `Pd` — grade one peer item on the review page. */
 async function gradeOnePeerItem(): Promise<void> {
-  log.info("Pd", "grade one peer item — start");
+  log.info("grade-one", "grade one peer item — start");
 
   // §3.1 Review container wait (se rejects on timeout, like prototype).
   // The decoded anchor (.css-2imjyh .css-7jkbgo a) no longer exists in
@@ -68,7 +68,7 @@ async function gradeOnePeerItem(): Promise<void> {
   // §3.2 Rubric group loop. Current UI groups options in
   // [role="radiogroup"] wrappers; div[role="group"] kept for old pages.
   const groups = document.querySelectorAll('div[role="group"], [role="radiogroup"]');
-  log.info("Pd", `rubric groups n=${groups.length}`);
+  log.info("grade-one", `rubric groups n=${groups.length}`);
   for (const a of groups) {
     const x = a.querySelectorAll<HTMLElement>(".option-contents > div:nth-child(1)");
     const nums = Array.from(
@@ -81,10 +81,10 @@ async function gradeOnePeerItem(): Promise<void> {
       // Decoded rule: max - min > 1 -> last option, else first option.
       const spread = nums.length > 0 ? Math.max(...nums) - Math.min(...nums) : 0;
       if (spread > 1) {
-        log.debug("Pd", `spread=${spread} > 1 — pick last option`, { nums });
+        log.debug("grade-one", `spread=${spread} > 1 — pick last option`, { nums });
         x[x.length - 1]?.click();
       } else {
-        log.debug("Pd", `spread=${spread} — pick first option`, { nums });
+        log.debug("grade-one", `spread=${spread} — pick first option`, { nums });
         x[0]?.click();
       }
     }
@@ -108,7 +108,7 @@ async function gradeOnePeerItem(): Promise<void> {
           : f.querySelector<HTMLElement>('textarea, [contenteditable="true"]');
       (editable ?? f).focus();
       document.execCommand("insertText", false, "Good ");
-      log.debug("Pd", 'feedback textarea filled with "Good "');
+      log.debug("grade-one", 'feedback textarea filled with "Good "');
     }
   }
 
@@ -121,23 +121,23 @@ async function gradeOnePeerItem(): Promise<void> {
     if (y) {
       y.scrollIntoView();
       y.click();
-      log.info("Pd", "submit clicked (+700ms, prototype timing)");
+      log.info("grade-one", "submit clicked (+700ms, prototype timing)");
     } else {
-      log.warn("Pd", "submit button not found at +700ms");
+      log.warn("grade-one", "submit button not found at +700ms");
     }
   }, 700);
 
-  log.info("Pd", "grade one peer item — done");
+  log.info("grade-one", "grade one peer item — done");
 }
 
 /** 1:1 of `_D` — auto peer review (the panel's "Grading ..." action). */
 export async function handleReview(): Promise<void> {
-  log.info("_D", "handleReview — start", { href: location.href });
+  log.info("review", "handleReview — start", { href: location.href });
 
   // §4.1 Guard: location.pathname (note: pathname, not href) + alert.
   if (!location.pathname.includes("/learn/")) {
     const msg = "This is not a course page, please go to your course page first";
-    log.error("_D", "guard failed — not /learn/", { href: location.href });
+    log.error("review", "guard failed — not /learn/", { href: location.href });
     alert(msg);
     return;
   }
@@ -170,7 +170,7 @@ export async function handleReview(): Promise<void> {
         r = location.href;
       } else break;
     } while (i < 5);
-    log.info("_D", `/review/ loop ended after i=${i}`);
+    log.info("review", `/review/ loop ended after i=${i}`);
   }
 
   // §4.4 "Left to complete" loop — count text is read BEFORE each Pd(),
@@ -184,5 +184,5 @@ export async function handleReview(): Promise<void> {
     await sleep(2000);
   } while (t != null && t.includes("left to complete"));
 
-  log.info("_D", "handleReview — done");
+  log.info("review", "handleReview — done");
 }

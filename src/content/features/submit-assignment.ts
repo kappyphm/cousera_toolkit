@@ -3,14 +3,14 @@
 // Switch write tab -> fill title/inputs/editors -> Uppy file upload -> honor
 // code -> submit -> confirm dialog -> chain requestGradingByPeer() only when
 // the page discloses "AI Grading" (prototype hD gate).
-import { sleep, waitForSelector } from "../shared/coursera.ts";
-import { findByText } from "../shared/finder.ts";
-import { generateRandomWords } from "../shared/random.ts";
-import { createLogger } from "../shared/logger.ts";
+import { sleep, waitForSelector } from "../../platform/coursera-dom.ts";
+import { findByText } from "../../platform/finder.ts";
+import { generateRandomWords } from "../../platform/random.ts";
+import { createLogger } from "../../platform/logger.ts";
 import { fillEditor, fillPlainInput } from "./editor-fill.ts";
-import { requestGradingByPeer } from "./request-grading-by-peer.ts";
+import { requestGradingByPeer } from "./request-peer-grading.ts";
 
-const log = createLogger("auto-submit-assignment");
+const log = createLogger("submit-assignment");
 
 /** 1:1 of prototype `hD` @ 734205 — true when page discloses AI Grading. */
 export async function hasAiGrading(): Promise<boolean> {
@@ -21,26 +21,26 @@ export async function hasAiGrading(): Promise<boolean> {
   // pages don't render it, in which case the prototype's own check
   // below decides exactly as before.
   if (findByText("button", "Switch to peer grading")) {
-    log.debug("hD", "AI Grading detected via Switch-to-peer-grading button");
+    log.debug("ai-grading", "AI Grading detected via Switch-to-peer-grading button");
     return true;
   }
   const el = await waitForSelector(".disclosure-header", 1000).catch(() => null);
   const hit = el?.textContent?.includes("AI Grading") ?? false;
-  log.debug("hD", `AI Grading disclosure=${hit}`);
+  log.debug("ai-grading", `AI Grading disclosure=${hit}`);
   return hit;
 }
 
 /** 1:1 of `mD` — submit peer-graded assignment with random placeholder content. */
 export async function handlePeerGradedAssignment(): Promise<void> {
-  log.info("mD", "handlePeerGradedAssignment — start", { href: location.href });
+  log.info("submit", "handlePeerGradedAssignment — start", { href: location.href });
   try {
     // 1. Switch to the write tab of the submission part editor.
     await waitForSelector<HTMLElement>('div[role="tablist"] button:nth-child(2)')
       .then((btn) => {
-        log.info("mD", "click write tab");
+        log.info("submit", "click write tab");
         btn.click();
       })
-      .catch(() => log.warn("mD", "write tab not found — skipping"));
+      .catch(() => log.warn("submit", "write tab not found — skipping"));
     await sleep(1000);
 
     // 2. Title + AI-grading gate (evaluated before fill, used after submit).
@@ -56,12 +56,12 @@ export async function handlePeerGradedAssignment(): Promise<void> {
           await sleep(500);
           await fillPlainInput(input, title);
           await sleep(500);
-          log.info("mD", "title filled");
+          log.info("submit", "title filled");
         } else {
-          log.debug("mD", "title already set — skipping");
+          log.debug("submit", "title already set — skipping");
         }
       })
-      .catch(() => log.warn("mD", "title field not found — skipping"));
+      .catch(() => log.warn("submit", "title field not found — skipping"));
 
     // 4. Plain text inputs — random 3 words.
     const plainInputs = document.querySelectorAll<HTMLInputElement>(
@@ -70,14 +70,14 @@ export async function handlePeerGradedAssignment(): Promise<void> {
     for (const el of plainInputs) {
       if (!el.value) await fillPlainInput(el, generateRandomWords(3));
     }
-    log.info("mD", `plain inputs processed n=${plainInputs.length}`);
+    log.info("submit", `plain inputs processed n=${plainInputs.length}`);
 
     // 5. Textareas — random 3 words.
     const textareas = document.querySelectorAll<HTMLTextAreaElement>("textarea");
     for (const el of textareas) {
       if (!el.value) await fillPlainInput(el, generateRandomWords(3));
     }
-    log.info("mD", `textareas processed n=${textareas.length}`);
+    log.info("submit", `textareas processed n=${textareas.length}`);
 
     // 6. Rich text editors — Slate fill via hx().
     const editors = document.querySelectorAll(
@@ -93,7 +93,7 @@ export async function handlePeerGradedAssignment(): Promise<void> {
         await fillEditor(target, generateRandomWords(3));
       }
     }
-    log.info("mD", `editors processed n=${seen.size}`);
+    log.info("submit", `editors processed n=${seen.size}`);
 
     // 7. File upload — Uppy buttons, random markdown file (prototype verbatim).
     const uppyButtons = document.querySelectorAll<HTMLElement>(".rc-UppyFileUploader button");
@@ -109,63 +109,63 @@ export async function handlePeerGradedAssignment(): Promise<void> {
         dt.items.add(file);
         (input as HTMLInputElement).files = dt.files;
         input.dispatchEvent(new Event("change", { bubbles: true }));
-        log.info("mD", `file uploaded name=${fileName}`);
+        log.info("submit", `file uploaded name=${fileName}`);
       } else {
-        log.warn("mD", "input[type=file] not found after uppy click");
+        log.warn("submit", "input[type=file] not found after uppy click");
       }
       await sleep(2000);
     }
-    log.info("mD", `uppy buttons processed n=${uppyButtons.length}`);
+    log.info("submit", `uppy buttons processed n=${uppyButtons.length}`);
 
     // 8. Honor code + submit + confirm dialog.
     await sleep(2000);
     await waitForSelector<HTMLElement>('input[type="checkbox"], .rc-HonorCodeCheckbox, #agreement-checkbox-base', 1000)
       .then((el) => {
-        log.info("mD", "click honor code checkbox");
+        log.info("submit", "click honor code checkbox");
         el.click();
       })
-      .catch(() => log.warn("mD", "honor code checkbox not found — skipping"));
+      .catch(() => log.warn("submit", "honor code checkbox not found — skipping"));
     await waitForSelector<HTMLElement>('button[aria-label="Submit"], button[data-e2e="submit-assignment"]', 2000)
       .then((el) => {
-        log.info("mD", "click submit");
+        log.info("submit", "click submit");
         el.click();
       })
-      .catch(() => log.warn("mD", "submit button not found — skipping"));
+      .catch(() => log.warn("submit", "submit button not found — skipping"));
     await sleep(2000);
     await waitForSelector<HTMLElement>(
       'button[data-e2e="dialog-submit"], button[data-track-component="submit_confirm"], button[data-testid="dialog-submit-button"]',
       2000
     )
       .then((el) => {
-        log.info("mD", "click confirm dialog");
+        log.info("submit", "click confirm dialog");
         el.click();
       })
-      .catch(() => log.warn("mD", "confirm dialog button not found — skipping"));
+      .catch(() => log.warn("submit", "confirm dialog button not found — skipping"));
     await sleep(2000);
 
     // 9. Chain requestGradingByPeer() ONLY when page discloses AI Grading
     //    (prototype: try{r && await d2()}catch{} — r = hD()).
     if (aiGrading) {
-      log.info("mD", "AI Grading disclosed — chaining requestGradingByPeer");
+      log.info("submit", "AI Grading disclosed — chaining requestGradingByPeer");
       try {
         await requestGradingByPeer();
       } catch (e) {
         // Prototype: empty catch around d2(). Log but do not rethrow —
         // assignment submit already succeeded.
-        log.error("mD", "requestGradingByPeer failed after submit", {
+        log.error("submit", "requestGradingByPeer failed after submit", {
           error: (e as Error).message
         });
       }
     } else {
-      log.info("mD", "no AI Grading disclosure — skipping requestGradingByPeer");
+      log.info("submit", "no AI Grading disclosure — skipping requestGradingByPeer");
     }
 
-    log.info("mD", "handlePeerGradedAssignment — done");
+    log.info("submit", "handlePeerGradedAssignment — done");
   } catch (err) {
     // Prototype: console.error("Error handling peer-graded assignment:", err)
     // — and nothing else: mD does NOT rethrow (parity fix; the caller's
     // toast wrapper surfaces the failure in the prototype).
-    log.error("mD", "Error handling peer-graded assignment:", {
+    log.error("submit", "Error handling peer-graded assignment:", {
       error: (err as Error).message
     });
   }

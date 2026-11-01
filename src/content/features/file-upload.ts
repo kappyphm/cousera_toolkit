@@ -4,8 +4,8 @@
 // mD step 7 (click uploader button -> DataTransfer -> change event),
 // but the content is a real Gemini answer, not Ut(100) random words,
 // and the result is VERIFIED in the UI before returning.
-import { sleep } from "../shared/coursera.ts";
-import { CloneError, createLogger } from "../shared/logger.ts";
+import { sleep } from "../../platform/coursera-dom.ts";
+import { CloneError, createLogger } from "../../platform/logger.ts";
 import type { FilePart } from "./question-extract.ts";
 
 const log = createLogger("file-upload");

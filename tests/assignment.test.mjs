@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadFixture } from "./helpers.mjs";
-import { extractTextParts, extractFileParts } from "../src/content/question-extract.ts";
+import { extractTextParts, extractFileParts } from "../src/content/features/question-extract.ts";
 
 test("Capstone assignment: 0 text parts, exactly 4 file parts", () => {
   loadFixture(

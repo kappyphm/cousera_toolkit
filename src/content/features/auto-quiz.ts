@@ -20,16 +20,16 @@
 //     an exact term match (Gemini echoes Qz terms) is tried first.
 //  3. `Yc` is reconstructed from the decoded essence in v3/01 §4.
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
-import { sleep, waitForSelector } from "../shared/coursera.ts";
-import { parseGeminiError } from "../shared/gemini-error.ts";
-import { DEFAULT_MODEL, withGeminiRetry } from "../shared/gemini.ts";
-import { CloneError, createLogger } from "../shared/logger.ts";
-import { findAllFirst, findFirst } from "../shared/finder.ts";
+import { sleep, waitForSelector } from "../../platform/coursera-dom.ts";
+import { parseGeminiError } from "../../platform/gemini-error.ts";
+import { DEFAULT_MODEL, withGeminiRetry } from "../../platform/gemini.ts";
+import { CloneError, createLogger } from "../../platform/logger.ts";
+import { findAllFirst, findFirst } from "../../platform/finder.ts";
 import { fillPlainInput } from "./editor-fill.ts";
 
 const log = createLogger("auto-quiz");
 
-// Tiered selectors (issue #32 — stability order, see shared/finder):
+// Tiered selectors (issue #32 — stability order, see platform/finder):
 // the current attempt UI renders each question as a form part with a
 // data-testid (the same anchor family the assignment extractor uses);
 // rc-* classes are legacy, and the .css-* hashes are the most fragile
@@ -363,7 +363,7 @@ async function fillAnswers(
 
 /** 1:1 orchestration of `x2` (Appendix A), minus cC bank and oD upload. */
 export async function handleAutoquiz(): Promise<void> {
-  log.info("x2", "Processing quiz... — start", { href: location.href });
+  log.info("quiz", "Processing quiz... — start", { href: location.href });
   const { isAutoSubmitQuiz: flag } = await chrome.storage.local.get("isAutoSubmitQuiz");
   const autoSubmit = (flag as boolean | undefined) ?? false;
 
@@ -384,7 +384,7 @@ export async function handleAutoquiz(): Promise<void> {
     }
   }
   if (location.href.includes("/view-feedback")) {
-    log.info("x2", "on /view-feedback — nothing to do (prototype returns)");
+    log.info("quiz", "on /view-feedback — nothing to do (prototype returns)");
     return;
   }
 
@@ -402,9 +402,9 @@ export async function handleAutoquiz(): Promise<void> {
     .catch(() => {});
 
   const containers = findQuizContainers();
-  log.info("x2", `question containers n=${containers.length}`);
+  log.info("quiz", `question containers n=${containers.length}`);
   if (containers.length === 0) {
-    log.error("x2", "no question containers found — aborting");
+    log.error("quiz", "no question containers found — aborting");
     return;
   }
 
@@ -420,7 +420,7 @@ export async function handleAutoquiz(): Promise<void> {
 
   if (!autoSubmit) {
     log.info(
-      "x2",
+      "quiz",
       "Quiz filled! Auto-submit is OFF (isAutoSubmitQuiz) — review, then submit manually."
     );
     return;
@@ -455,7 +455,7 @@ export async function handleAutoquiz(): Promise<void> {
   // Prototype: `if (!filled || filled.length == 0) return;` — `filled`
   // is rD's unmatched list; nothing unmatched -> nothing more to do.
   if (unmatched.length === 0) {
-    log.info("x2", "Quiz completed! All questions answered by Gemini.");
+    log.info("quiz", "Quiz completed! All questions answered by Gemini.");
     return;
   }
   let tv = document.querySelector('[data-testid="tunnel-vision-content"]');
@@ -468,7 +468,7 @@ export async function handleAutoquiz(): Promise<void> {
   document.querySelector<HTMLElement>('button[data-testid="view-feedback-button"]')?.click();
   // Prototype ends with oD(...) uploading unmatched questions to the
   // vendor server — dropped in this variant (no vendor server).
-  log.info("x2", "Quiz completed! (oD upload skipped — clone has no vendor server)", {
+  log.info("quiz", "Quiz completed! (oD upload skipped — clone has no vendor server)", {
     unmatched: unmatched.length
   });
 }

@@ -5,16 +5,9 @@
 // HTTP error statuses are logged, not thrown — the prototype checks almost
 // none of them; CloneError remains only where the prototype also stops
 // (e.g. missing videoId throw, waitForSelector timeout).
-import {
-  csrfHeaders,
-  getCourseMaterials,
-  getUserId,
-  postJson,
-  showProgressToast,
-  sleep,
-  type MaterialItem
-} from "../shared/coursera.ts";
-import { CloneError, createLogger } from "../shared/logger.ts";
+import { showProgressToast, sleep } from "../../platform/coursera-dom.ts";
+import { csrfHeaders, getCourseMaterials, getUserId, postJson, type MaterialItem } from "../../platform/coursera-api.ts";
+import { CloneError, createLogger } from "../../platform/logger.ts";
 
 const log = createLogger("skip-video-reading");
 

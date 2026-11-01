@@ -1,6 +1,7 @@
+// Coursera API client (split from the former shared/coursera.ts).
 import { CloneError, createLogger } from "./logger.ts";
 
-const log = createLogger("coursera-shared");
+const log = createLogger("coursera-api");
 
 export interface CourseMaterials {
   data: MaterialItem[];
@@ -16,42 +17,6 @@ export interface MaterialItem {
   [k: string]: unknown;
 }
 
-export function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-/** 1:1 of prototype `se` — poll querySelector, reject (never null) on timeout. */
-export function waitForSelector<T extends Element = Element>(
-  selector: string,
-  timeoutMs = 5000
-): Promise<T> {
-  log.debug("waitForSelector", `waiting ${selector}`, { timeoutMs });
-  const started = performance.now();
-  return new Promise<T>((resolve, reject) => {
-    const timer = window.setInterval(() => {
-      const el = document.querySelector<T>(selector);
-      if (el) {
-        window.clearInterval(timer);
-        window.clearTimeout(killer);
-        log.debug("waitForSelector", `found ${selector}`, {
-          ms: Math.round(performance.now() - started)
-        });
-        resolve(el);
-      }
-    }, 100);
-    const killer = window.setTimeout(() => {
-      window.clearInterval(timer);
-      const err = new CloneError(`Element not found within ${timeoutMs}ms`, {
-        module: "coursera-shared",
-        step: "waitForSelector",
-        ms: timeoutMs
-      });
-      log.error("waitForSelector", selector, { ms: timeoutMs });
-      reject(err);
-    }, timeoutMs);
-  });
-}
-
 /**
  * 1:1 of prototype `c2` — slug from /learn/<slug>/, then course materials.
  * Throws on any unexpected shape (no silent fallback).
@@ -61,7 +26,7 @@ export async function getCourseMaterials(): Promise<CourseMaterials> {
   const slug = href.split("/")[4];
   if (!slug) {
     throw new CloneError("cannot parse slug from URL", {
-      module: "coursera-shared",
+      module: "coursera-api",
       step: "getCourseMaterials",
       slug: href
     });
@@ -80,7 +45,7 @@ export async function getCourseMaterials(): Promise<CourseMaterials> {
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new CloneError("course materials fetch failed", {
-      module: "coursera-shared",
+      module: "coursera-api",
       step: "getCourseMaterials",
       slug,
       status: res.status,
@@ -107,7 +72,7 @@ export async function getCourseMaterials(): Promise<CourseMaterials> {
       bodyPreview: JSON.stringify(body).slice(0, 400)
     });
     throw new CloneError("course materials payload missing linked items", {
-      module: "coursera-shared",
+      module: "coursera-api",
       step: "getCourseMaterials",
       slug,
       status: res.status,
@@ -134,14 +99,14 @@ export async function getUserId(): Promise<string> {
   const hit = scripts.find((s) => s.innerText.includes("var userJson"));
   if (!hit) {
     throw new CloneError("userJson script not found", {
-      module: "coursera-shared",
+      module: "coursera-api",
       step: "getUserId"
     });
   }
   const m = hit.innerText.match(/var userJson = "(.+)";/);
   if (!m?.[1]) {
     throw new CloneError("userJson match failed", {
-      module: "coursera-shared",
+      module: "coursera-api",
       step: "getUserId"
     });
   }
@@ -150,13 +115,13 @@ export async function getUserId(): Promise<string> {
     parsed = JSON.parse(m[1].replace(/\\"/g, '"')) as typeof parsed;
   } catch (e) {
     throw new CloneError(`userJson parse failed: ${(e as Error).message}`, {
-      module: "coursera-shared",
+      module: "coursera-api",
       step: "getUserId"
     });
   }
   if (parsed.id == null || parsed.id === "") {
     throw new CloneError("userJson has no id", {
-      module: "coursera-shared",
+      module: "coursera-api",
       step: "getUserId"
     });
   }
@@ -197,7 +162,7 @@ export function getMetadata(): CourseMeta {
   const raw = el?.getAttribute("data-click-value") ?? "";
   if (!raw) {
     throw new CloneError("data-click-value attr missing on course-home link", {
-      module: "coursera-shared",
+      module: "coursera-api",
       step: "getMetadata",
       href: location.href
     });
@@ -207,7 +172,7 @@ export function getMetadata(): CourseMeta {
     parsed = JSON.parse(raw) as CourseMeta;
   } catch (e) {
     throw new CloneError(`data-click-value JSON parse failed: ${(e as Error).message}`, {
-      module: "coursera-shared",
+      module: "coursera-api",
       step: "getMetadata",
       preview: raw.slice(0, 200)
     });
@@ -229,29 +194,6 @@ export function csrfHeaders(extra: Record<string, string> = {}): Record<string, 
     ...(csrf ? { "X-CSRF3-Token": csrf } : {}),
     ...extra
   };
-}
-
-/**
- * Progress toast — the prototype CALLER renders a toast containing
- * `<span id="progress">` (decoded style: border 1px solid #0356fc,
- * position top-right) before running dD/vD, and the flow updates that
- * span. The clone has no panel, so the content script creates the same
- * element itself (F3 fix — previously the span never existed and every
- * progress write went nowhere).
- */
-export function showProgressToast(html: string): HTMLElement {
-  document.getElementById("clone-progress-toast")?.remove();
-  const el = document.createElement("div");
-  el.id = "clone-progress-toast";
-  el.setAttribute(
-    "style",
-    "position:fixed;top:16px;right:16px;z-index:99999;background:#fff;" +
-      "border:1px solid #0356fc;border-radius:8px;padding:10px 14px;" +
-      "font:14px system-ui;color:#111;box-shadow:0 4px 16px rgba(0,0,0,.18)"
-  );
-  el.innerHTML = html;
-  document.body.appendChild(el);
-  return el;
 }
 
 /**

@@ -11,8 +11,8 @@
 //   the native value-setter hack so React controlled inputs actually fire
 //   onChange (direct `el.value=` assignment + synthetic event is ignored by
 //   React's value tracker -> empty payload on submit).
-import { sleep } from "../shared/coursera.ts";
-import { createLogger } from "../shared/logger.ts";
+import { sleep } from "../../platform/coursera-dom.ts";
+import { createLogger } from "../../platform/logger.ts";
 
 const log = createLogger("editor-fill");
 

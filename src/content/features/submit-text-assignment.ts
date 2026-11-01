@@ -7,12 +7,12 @@
 // review the content then Save draft → honor → Submit by hand. This
 // module never clicks submit, never confirms dialogs, never chains
 // post-submit calls.
-import { sleep } from "../shared/coursera.ts";
-import { fetchGeminiAnswersBatch } from "../shared/gemini.ts";
-import { CloneError, createLogger } from "../shared/logger.ts";
+import { sleep } from "../../platform/coursera-dom.ts";
+import { fetchGeminiAnswersBatch } from "../../platform/gemini.ts";
+import { CloneError, createLogger } from "../../platform/logger.ts";
 import { fillEditor, fillPlainInput } from "./editor-fill.ts";
 import { attachAnswerFile } from "./file-upload.ts";
-import { progress } from "./progress-ui.ts";
+import { progress } from "../progress.ts";
 import {
   extractFileParts,
   extractTextParts,
@@ -21,7 +21,7 @@ import {
   type TextPart
 } from "./question-extract.ts";
 
-const log = createLogger("auto-text-submit");
+const log = createLogger("submit-text-assignment");
 
 function buildQuestion(p: Pick<TextPart, "index" | "points" | "prompt" | "type">): string {
   return [

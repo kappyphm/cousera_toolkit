@@ -12,7 +12,7 @@ import type {
   BgToPanel,
   PanelToBg,
   ToolkitEventEnvelope
-} from "../shared/bridge.ts";
+} from "../platform/bridge.ts";
 
 const log = (msg: string, extra: unknown = {}) =>
   console.info(`[info] background.sw ${msg}`, extra);
