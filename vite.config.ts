@@ -1,9 +1,10 @@
 import { defineConfig } from "vite";
 import { viteStaticCopy } from "vite-plugin-static-copy";
 
-// MV3: the background service worker is the only entry here. The
-// toolbar popup was retired in favor of the in-page sidebar, which
-// ships inside the content bundle (vite.content.config.ts).
+// MV3 entries: the background service worker and the side panel page
+// (sidepanel.html, a real extension page with its own document). The
+// content script keeps its own single-file build
+// (vite.content.config.ts) — it must stay one classic script.
 // No bundling tricks — keep 1:1 module mapping with prototype logic.
 export default defineConfig({
   plugins: [
@@ -20,7 +21,8 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       input: {
-        background: "src/background/sw.ts"
+        background: "src/background/sw.ts",
+        sidepanel: "sidepanel.html"
       },
       output: {
         entryFileNames: "assets/[name].js",

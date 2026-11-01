@@ -8,7 +8,6 @@ import { GoogleGenAI } from "@google/genai";
 import { sleep } from "./coursera.ts";
 import { formatDuration, parseGeminiError } from "./gemini-error.ts";
 import { CloneError, createLogger } from "./logger.ts";
-import { notifyUser } from "./notify.ts";
 
 const log = createLogger("gemini");
 
@@ -89,30 +88,25 @@ export async function withGeminiRetry<T>(
         raw: (e as Error)?.message?.slice(0, 300)
       });
       if (serverBlocked) {
-        notifyUser(
-          `${info.summary} — server yêu cầu chờ ${formatDuration(info.retryDelaySeconds as number)}, không tự retry.`,
-          "error",
-          15000
+        log.error(
+          "retry",
+          `${info.summary} — server yêu cầu chờ ${formatDuration(info.retryDelaySeconds as number)}, không tự retry.`
         );
         throw e;
       }
       if (exhausted) {
         if (info.status === 429 || info.dailyQuota) {
-          notifyUser(
-            `${info.summary}. Đã dừng${
-              enabled ? "" : " (tự retry đang tắt)"
-            } — chi tiết trong console (F12).`,
-            "error",
-            15000
+          log.error(
+            "retry",
+            `${info.summary}. Đã dừng${enabled ? "" : " (tự retry đang tắt)"}.`
           );
         }
         throw e;
       }
       retries++;
-      notifyUser(
-        `${info.summary} — tự retry lần ${retries}/${RETRY_DELAYS_S.length} sau ${Math.round(delayS)}s…`,
-        "warn",
-        delayS * 1000 + 2000
+      log.warn(
+        "retry",
+        `${info.summary} — tự retry lần ${retries}/${RETRY_DELAYS_S.length} sau ${Math.round(delayS)}s…`
       );
       await sleep(delayS * 1000);
     }
