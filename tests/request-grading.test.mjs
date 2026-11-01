@@ -1,15 +1,14 @@
 // d2 (request grading by peer) submission-id extraction (issue #41).
-// The prototype's decoded read is
-//   linked["onDemandPeerSubmissionProgresses.v1"][0].latestSubmissionSummary.id
-// with a FLAT linked key (analysis/v2/02 §2.2, decoder e(107)). An
-// earlier clone build nested the key as
-// linked.onDemandPeerSubmissionProgresses["v1"], which does not exist
-// in the real response — verified live 2026-11-01, where the genuine
-// response for an item without a submission was:
-//   linked: { "onDemandPeerSubmissionProgresses.v1":
-//             [{ itemId, id, userId, courseId }] }   (no summaries)
-// These tests pin the flat shape, the no-summary case, and that the
-// old nested shape yields null rather than a phantom id.
+// Shape history, all live-verified 2026-11-01:
+//  - The linked key is FLAT: linked["onDemandPeerSubmissionProgresses.v1"]
+//    (an earlier clone build nested it and read undefined everywhere).
+//  - An item with no submission returns an entry with only
+//    { itemId, id, userId, courseId } — no summaries at all.
+//  - An item WITH a submission returns summaries as WRAPPERS:
+//    latestSubmissionSummary = { summary: {...}, computed: {...} }
+//    (panel digest: "latestSubmissionSummary={keys: summary,computed}").
+//    The id sits one hop deeper, under summary or computed; the
+//    extractor tries both in order and reports the source.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { submissionIdFromPermissions } from "../src/content/features/request-peer-grading.ts";
@@ -18,15 +17,50 @@ const wrap = (entry) => ({
   linked: { "onDemandPeerSubmissionProgresses.v1": [entry] }
 });
 
-test("reads latestSubmissionSummary.id via the flat linked key (prototype path)", () => {
+test("reads the id from latestSubmissionSummary.summary", () => {
   const body = wrap({
     itemId: "item1",
     id: "111~course1~item1",
     userId: 111,
     courseId: "course1",
-    latestSubmissionSummary: { id: "sub-1" }
+    latestSubmissionSummary: {
+      summary: { id: "sub-1", state: "submitted" },
+      computed: { grade: 0 }
+    },
+    latestDraftSummary: { summary: {}, computed: {} }
   });
-  assert.deepEqual(submissionIdFromPermissions(body), { id: "sub-1" });
+  assert.deepEqual(submissionIdFromPermissions(body), {
+    id: "sub-1",
+    source: "latestSubmissionSummary.summary"
+  });
+});
+
+test("falls back to latestSubmissionSummary.computed when summary has no id", () => {
+  const body = wrap({
+    latestSubmissionSummary: {
+      summary: { state: "submitted" },
+      computed: { id: "sub-2" }
+    }
+  });
+  assert.deepEqual(submissionIdFromPermissions(body), {
+    id: "sub-2",
+    source: "latestSubmissionSummary.computed"
+  });
+});
+
+test("null when neither hop of the wrapper carries an id", () => {
+  for (const wrapper of [
+    { summary: {}, computed: {} },
+    { summary: null, computed: null },
+    { summary: { id: "" }, computed: { id: 42 } },
+    {},
+    null
+  ]) {
+    assert.equal(
+      submissionIdFromPermissions(wrap({ latestSubmissionSummary: wrapper })),
+      null
+    );
+  }
 });
 
 test("null for the real no-submission entry shape (no summaries at all)", () => {
@@ -40,20 +74,11 @@ test("null for the real no-submission entry shape (no summaries at all)", () => 
   assert.equal(submissionIdFromPermissions(body), null);
 });
 
-test("null when the summary is present but carries no usable id", () => {
-  for (const summary of [null, {}, { id: "" }, { id: 42 }]) {
-    assert.equal(
-      submissionIdFromPermissions(wrap({ latestSubmissionSummary: summary })),
-      null
-    );
-  }
-});
-
 test("null for the old nested-key shape (the transcription bug)", () => {
   const body = {
     linked: {
       onDemandPeerSubmissionProgresses: {
-        v1: [{ latestSubmissionSummary: { id: "sub-1" } }]
+        v1: [{ latestSubmissionSummary: { summary: { id: "sub-1" } } }]
       }
     }
   };

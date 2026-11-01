@@ -17,14 +17,26 @@ const MUTATION = `mutation RequestGradingByPeer($input: PeerReviewAi_RequestGrad
 }
 `;
 
+/**
+ * A summary field in the live response is a WRAPPER object
+ * { summary, computed } (verified from the panel digest, 2026-11-01:
+ * latestSubmissionSummary={keys: summary,computed}) — there is no
+ * direct .id on it; the referenced resource's data sits one hop
+ * deeper, under one of the two keys.
+ */
+interface SummaryWrapper {
+  summary?: Record<string, unknown> | null;
+  computed?: Record<string, unknown> | null;
+}
+
 interface SubmissionProgressEntry {
   itemId?: string;
   id?: string;
   userId?: number;
   courseId?: string;
-  latestSubmissionSummary?: { id?: string } | null;
-  latestAttemptSummary?: { id?: string } | null;
-  latestDraftSummary?: { id?: string } | null;
+  latestSubmissionSummary?: SummaryWrapper | null;
+  latestAttemptSummary?: SummaryWrapper | null;
+  latestDraftSummary?: SummaryWrapper | null;
 }
 
 interface PermissionsBody {
@@ -47,20 +59,52 @@ const SUMMARY_KEYS = [
   "latestDraftSummary"
 ] as const;
 
+/** The two real keys of a summary wrapper, in resolution order. */
+const ID_HOPS = ["summary", "computed"] as const;
+
 /**
- * Submission id for the RequestGradingByPeer mutation — the
- * prototype's exact read (analysis/v2/02 §2.2):
- * linked["onDemandPeerSubmissionProgresses.v1"][0].latestSubmissionSummary.id
- * Returns null when any hop is missing; an entry without summaries
- * is real (verified live 2026-11-01 on an item with no submission:
- * the entry carries only itemId/id/userId/courseId).
+ * Submission id for the RequestGradingByPeer mutation. The
+ * prototype's raw chain (analysis/v2/02 §2.2) has exactly TWO inner
+ * hops after the entry — entry -> latestSubmissionSummary -> <hop>
+ * -> .id — but the doc's decode labels for those hops contradict
+ * each other (one is labelled "[0]", the other
+ * ".latestSubmissionSummary"), and past clone builds each flattened
+ * it differently (one read .computed.id; the F1 audit then read .id
+ * directly). Live evidence (2026-11-01) fixes the shape: the
+ * summary is a { summary, computed } wrapper. The extractor tries
+ * the wrapper's two real keys in order and reports which one
+ * supplied the id, so the choice is observable in the run log
+ * rather than assumed; the failure digest prints both hops' ids.
  */
 export function submissionIdFromPermissions(
   body: PermissionsBody | null | undefined
-): { id: string } | null {
+): { id: string; source: string } | null {
   const entry = body?.linked?.["onDemandPeerSubmissionProgresses.v1"]?.[0];
-  const id = entry?.latestSubmissionSummary?.id;
-  return typeof id === "string" && id.length > 0 ? { id } : null;
+  const wrapper = entry?.latestSubmissionSummary;
+  if (!wrapper) return null;
+  for (const hop of ID_HOPS) {
+    const id = wrapper[hop]?.id;
+    if (typeof id === "string" && id.length > 0) {
+      return { id, source: `latestSubmissionSummary.${hop}` };
+    }
+  }
+  return null;
+}
+
+/** One summary wrapper's shape, one level deep (keys + id values). */
+function describeWrapper(w: SummaryWrapper | null | undefined): string {
+  if (w === undefined) return "absent";
+  if (w === null) return "null";
+  const parts = ID_HOPS.map((hop) => {
+    const sub = w[hop];
+    if (sub === undefined) return `${hop}=absent`;
+    if (sub === null) return `${hop}=null`;
+    const id = sub.id;
+    return `${hop}={keys: ${Object.keys(sub).join(",") || "(none)"}; id: ${
+      typeof id === "string" ? id : "absent"
+    }}`;
+  });
+  return `{${parts.join("; ")}}`;
 }
 
 /** Compact shape digest of the permissions response, for logs. */
@@ -72,12 +116,7 @@ function describeEntry(body: PermissionsBody | null | undefined): string {
     const keys = Object.keys(body?.linked ?? {}).join(",");
     return `linked keys: ${keys || "(none)"}; no submission-progress entry`;
   }
-  const summaries = SUMMARY_KEYS.map((s) => {
-    const v = entry[s];
-    if (v === undefined) return `${s}=absent`;
-    if (v === null) return `${s}=null`;
-    return `${s}={keys: ${Object.keys(v).join(",") || "(none)"}}`;
-  }).join("; ");
+  const summaries = SUMMARY_KEYS.map((s) => `${s}=${describeWrapper(entry[s])}`).join("; ");
   return `entry keys: ${Object.keys(entry).join(",")}; ${summaries}`;
 }
 
@@ -155,11 +194,12 @@ export async function requestGradingByPeer(): Promise<void> {
     status: res.status
   });
   const body = (await res.json()) as PermissionsBody;
-  // Prototype chain (decoded verbatim, analysis/v2/02 §2.2):
-  // linked["onDemandPeerSubmissionProgresses.v1"][0].latestSubmissionSummary.id
-  // (F1 fix: an earlier clone build read `.computed.id`, which appears
-  // nowhere in the decoded prototype evidence — and nested the linked
-  // key, which the live response disproved; see PermissionsBody.)
+  // Prototype chain (analysis/v2/02 §2.2): the raw bundle code hops
+  // entry -> latestSubmissionSummary -> <one more hop> -> .id. The
+  // doc's one-line summary flattened that last hop away, and past
+  // clone builds inherited the flattening (plus a nested linked key
+  // the live response disproved). See submissionIdFromPermissions
+  // for the live-verified wrapper shape.
   const found = submissionIdFromPermissions(body);
   if (!found) {
     // The prototype sends the mutation anyway here (submissionId
@@ -173,9 +213,10 @@ export async function requestGradingByPeer(): Promise<void> {
     );
   }
   const submissionId = found.id;
-  log.info("request", `submissionId=${submissionId}`, {
+  log.info("request", `submissionId=${submissionId} (source: ${found.source})`, {
     branchId,
-    courseId: meta.course_id
+    courseId: meta.course_id,
+    source: found.source
   });
 
   // Vendor gate (clone noop).
