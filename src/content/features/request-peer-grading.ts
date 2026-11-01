@@ -17,14 +17,61 @@ const MUTATION = `mutation RequestGradingByPeer($input: PeerReviewAi_RequestGrad
 }
 `;
 
+interface SubmissionProgressEntry {
+  latestSubmissionSummary?: { id?: string } | null;
+  latestAttemptSummary?: { id?: string } | null;
+  latestDraftSummary?: { id?: string } | null;
+}
+
 interface PermissionsBody {
   linked?: {
     onDemandPeerSubmissionProgresses?: {
-      "v1"?: Array<{
-        latestSubmissionSummary?: { id?: string };
-      }>;
+      "v1"?: Array<SubmissionProgressEntry | null>;
     };
   };
+}
+
+const SUBMISSION_ID_SOURCES = [
+  "latestSubmissionSummary",
+  "latestAttemptSummary",
+  "latestDraftSummary"
+] as const;
+
+/**
+ * Submission id for the RequestGradingByPeer mutation. The prototype
+ * reads ONLY latestSubmissionSummary.id (analysis/v2/02 §2.2), but on
+ * the current API that summary comes back empty for an AI-graded
+ * submission (live log 2026-11-01: id missing -> the mutation was
+ * sent with submissionId undefined -> HTTP 400). Fallback (issue
+ * #41): walk the other two summaries the prototype's own `fields`
+ * projection already requests, in order; the returned source lets
+ * the run log show which summary supplied the id.
+ */
+export function submissionIdFromPermissions(
+  body: PermissionsBody | null | undefined
+): { id: string; source: (typeof SUBMISSION_ID_SOURCES)[number] } | null {
+  const entry = body?.linked?.onDemandPeerSubmissionProgresses?.["v1"]?.[0];
+  if (!entry) return null;
+  for (const source of SUBMISSION_ID_SOURCES) {
+    const id = entry[source]?.id;
+    if (typeof id === "string" && id.length > 0) return { id, source };
+  }
+  return null;
+}
+
+/** Compact shape digest of the submission-progress entry, for logs. */
+function describeEntry(body: PermissionsBody | null | undefined): string {
+  const entry = body?.linked?.onDemandPeerSubmissionProgresses?.["v1"]?.[0];
+  if (!entry) {
+    const keys = Object.keys(body?.linked ?? {}).join(",");
+    return `linked keys: ${keys || "(none)"}; no v1[0] entry`;
+  }
+  return SUBMISSION_ID_SOURCES.map((s) => {
+    const v = entry[s];
+    if (v === undefined) return `${s}=absent`;
+    if (v === null) return `${s}=null`;
+    return `${s}={keys: ${Object.keys(v).join(",") || "(none)"}}`;
+  }).join("; ");
 }
 
 /** Clone of prototype vendor gate `Cr as getSource` — no license check. */
@@ -97,24 +144,32 @@ export async function requestGradingByPeer(): Promise<void> {
   // Prototype: fetch(...).then(l => l.json()).then(chain) — NO res.ok check;
   // a JSON parse failure rejects d2 exactly like the prototype chain does.
   const res = await fetch(permUrl, { method: "GET" });
+  log.info("request", `GET PeerAssignmentPermissions status=${res.status}`, {
+    status: res.status
+  });
   const body = (await res.json()) as PermissionsBody;
   // Prototype chain (decoded verbatim, analysis/v2/02 §2.2):
   // linked.onDemandPeerSubmissionProgresses.v1[0].latestSubmissionSummary.id
   // (F1 fix: an earlier clone build read `.computed.id`, which appears
-  // nowhere in the decoded prototype evidence.)
-  const submissionId =
-    body?.linked?.onDemandPeerSubmissionProgresses?.["v1"]?.[0]?.latestSubmissionSummary?.id;
-  if (!submissionId) {
-    // Prototype does not branch here: `a` is simply undefined and the
-    // mutation below is still sent (JSON.stringify drops the key).
-    log.error("request", "latestSubmissionSummary.id missing — continuing like prototype", {
-      branchId,
-      courseId: meta.course_id,
-      itemId: meta.item_id,
-      linkedKeys: Object.keys(body?.linked ?? {})
-    });
+  // nowhere in the decoded prototype evidence.) Issue #41 adds the
+  // fallback walk + a hard stop — see submissionIdFromPermissions.
+  const found = submissionIdFromPermissions(body);
+  if (!found) {
+    // The prototype sends the mutation anyway here (submissionId
+    // undefined, JSON.stringify drops the key -> a guaranteed 400).
+    // Stop with the response shape in the message instead, so the
+    // next step is decidable from the panel log alone.
+    throw new CloneError(
+      `no submission id in PeerAssignmentPermissions response (${describeEntry(body)})`,
+      { module: "request-grading-by-peer", step: "submissionId", href: location.href }
+    );
   }
-  log.info("request", `submissionId=${String(submissionId)}`, { branchId, courseId: meta.course_id });
+  const submissionId = found.id;
+  log.info("request", `submissionId=${submissionId} (source: ${found.source})`, {
+    branchId,
+    courseId: meta.course_id,
+    source: found.source
+  });
 
   // Vendor gate (clone noop).
   gate();
@@ -150,10 +205,14 @@ export async function requestGradingByPeer(): Promise<void> {
       location.reload();
     } else {
       const text = await gqlRes.text().catch(() => "");
-      log.error("request", `mutation status=${gqlRes.status} (prototype: silent, no reload)`, {
-        status: gqlRes.status,
-        body: text.slice(0, 500)
-      });
+      // Body excerpt in the message itself (issue #41): the panel's
+      // text log is what gets pasted for diagnosis, and the GraphQL
+      // error body names the exact rejected field.
+      log.error(
+        "request",
+        `mutation status=${gqlRes.status} body=${text.slice(0, 200)} (prototype: silent, no reload)`,
+        { status: gqlRes.status, body: text.slice(0, 500) }
+      );
     }
   } catch (e) {
     log.error("request", "mutation fetch failed (prototype: console.log only)", {
