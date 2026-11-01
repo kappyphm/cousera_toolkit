@@ -32,6 +32,31 @@ function gate(): void {
   log.debug("gate", "Cr() vendor gate — noop in clone");
 }
 
+const BRANCH_PATTERN = /(\d+~[A-Za-z0-9-_]+)/;
+
+/**
+ * branchId = the digits before "~" in the page's embedded branch
+ * marker. Prototype reads exactly `body > script:nth-child(3)`; that
+ * stays the primary path. Fallback (issue #32): if the marker script
+ * is not at child 3 — its position depends on the page's other body
+ * children — scan every script in the body with the same regex
+ * before giving up.
+ */
+export function findBranchId(): string | undefined {
+  const primary =
+    (document.querySelector("body > script:nth-child(3)") as HTMLElement | null)?.innerText ?? "";
+  const hit = primary.match(BRANCH_PATTERN)?.[1];
+  if (hit) return hit.split("~")[0];
+  for (const s of Array.from(document.querySelectorAll("body script"))) {
+    const m = (s.textContent ?? "").match(BRANCH_PATTERN)?.[1];
+    if (m) {
+      log.warn("branchId", "primary script position missed — fallback scan found the marker");
+      return m.split("~")[0];
+    }
+  }
+  return undefined;
+}
+
 /** 1:1 of `d2` — force Coursera to route submission to human peer grading. */
 export async function requestGradingByPeer(): Promise<void> {
   log.info("d2", "requestGradingByPeer — start");
@@ -45,11 +70,8 @@ export async function requestGradingByPeer(): Promise<void> {
     return;
   }
 
-  // branchId from embedded script tag body (regex verbatim).
-  const scriptText =
-    (document.querySelector("body > script:nth-child(3)") as HTMLElement | null)?.innerText ?? "";
-  const m = scriptText.match(/(\d+~[A-Za-z0-9-_]+)/);
-  const branchId = m?.[1]?.split("~")[0];
+  // branchId from the embedded branch marker (see findBranchId).
+  const branchId = findBranchId();
   if (!branchId) {
     throw new CloneError("branchId not found in body script", {
       module: "request-grading-by-peer",

@@ -24,14 +24,45 @@ import { sleep, waitForSelector } from "../shared/coursera.ts";
 import { parseGeminiError } from "../shared/gemini-error.ts";
 import { DEFAULT_MODEL, withGeminiRetry } from "../shared/gemini.ts";
 import { CloneError, createLogger } from "../shared/logger.ts";
+import { findAllFirst, findFirst } from "../shared/finder.ts";
 import { fillPlainInput } from "./editor-fill.ts";
 
 const log = createLogger("auto-quiz");
 
-const CONTAINER_SELECTOR = ".css-1hhf6i, .rc-FormPartsQuestion";
-const QUESTION_SELECTOR = ".css-x3q7o9 > div:nth-child(2), .rc-CML";
+// Tiered selectors (issue #32 — stability order, see shared/finder):
+// the current attempt UI renders each question as a form part with a
+// data-testid (the same anchor family the assignment extractor uses);
+// rc-* classes are legacy, and the .css-* hashes are the most fragile
+// tier. Verified against the saved quiz pages in tests/: the testid
+// tier yields exactly the same containers (10 and 7) as the hash tier.
+const CONTAINER_SELECTORS = [
+  'div[data-testid^="part-Submission_"]',
+  ".rc-FormPartsQuestion",
+  ".css-1hhf6i"
+] as const;
+/** Union string for waitForSelector (any tier present = form ready). */
+const CONTAINER_WAIT_SELECTOR = CONTAINER_SELECTORS.join(", ");
+// The question text renders through a CML viewer whose content equals
+// the legacy extraction verbatim (17/17 containers across the saved
+// pages); the [data-testid="legend"] block is NOT used — it prefixes
+// the question with "N.Question N".
+const QUESTION_SELECTORS = [
+  '[data-testid="cml-viewer"]',
+  ".css-x3q7o9 > div:nth-child(2)",
+  ".rc-CML"
+] as const;
 const OPTION_SELECTOR = ".rc-Option";
 const OPTION_TEXT_SELECTOR = "span:nth-child(2), .rc-CML";
+
+/** All quiz question containers on the page, best tier first. */
+export function findQuizContainers(): HTMLElement[] {
+  return findAllFirst<HTMLElement>(CONTAINER_SELECTORS);
+}
+
+/** The question-text element inside one container, best tier first. */
+function questionEl(container: Element): HTMLElement | null {
+  return findFirst<HTMLElement>(QUESTION_SELECTORS, container);
+}
 
 /** Undecoded in v3/01 (sn(357)) — testid-pattern fallback, verify later. */
 const START_ATTEMPT_SELECTOR =
@@ -60,7 +91,7 @@ export function normalizeText(s: string): string {
 
 /** Normalized question key of a container (rD's `g`, incl. image src). */
 function questionKey(container: Element): string {
-  const qEl = container.querySelector<HTMLElement>(QUESTION_SELECTOR);
+  const qEl = questionEl(container);
   const img = container.querySelector<HTMLImageElement>("figure > img, img");
   const imgSrc = img?.src?.split("?")[0];
   return normalizeText((qEl?.innerText ?? "") + (imgSrc ? " " + imgSrc : "")).toLowerCase();
@@ -77,7 +108,7 @@ export function buildTerm(container: Element): QuizTerm {
     `${OPTION_SELECTOR} input, input, textarea`
   );
   const inputType = firstInput?.type ?? "text";
-  const qEl = container.querySelector<HTMLElement>(QUESTION_SELECTOR);
+  const qEl = questionEl(container);
   const question = normalizeText(qEl?.innerText ?? "");
   const choices = Array.from(container.querySelectorAll<HTMLElement>(OPTION_SELECTOR)).map((c) => {
     const img = c.querySelector<HTMLImageElement>("img");
@@ -357,7 +388,7 @@ export async function handleAutoquiz(): Promise<void> {
     return;
   }
 
-  await waitForSelector(CONTAINER_SELECTOR, 20_000).catch(() => {});
+  await waitForSelector(CONTAINER_WAIT_SELECTOR, 20_000).catch(() => {});
   document
     .querySelector('button[aria-label="Back"]')
     ?.addEventListener("click", () => window.history.back());
@@ -370,7 +401,7 @@ export async function handleAutoquiz(): Promise<void> {
     })
     .catch(() => {});
 
-  const containers = Array.from(document.querySelectorAll(CONTAINER_SELECTOR));
+  const containers = findQuizContainers();
   log.info("x2", `question containers n=${containers.length}`);
   if (containers.length === 0) {
     log.error("x2", "no question containers found — aborting");

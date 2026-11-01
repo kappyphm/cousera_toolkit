@@ -21,6 +21,7 @@
 //     wrapper (its textContent is still exactly 1 zero-width char),
 //     but focus must land on the inner textarea for insertText to work.
 import { sleep, waitForSelector } from "../shared/coursera.ts";
+import { findByText } from "../shared/finder.ts";
 import { createLogger } from "../shared/logger.ts";
 
 const log = createLogger("auto-peer-review");
@@ -48,11 +49,7 @@ const SUBMIT_SELECTOR =
 function findSubmitButton(): HTMLElement | null {
   const direct = document.querySelector<HTMLElement>(SUBMIT_SELECTOR);
   if (direct) return direct;
-  return (
-    Array.from(document.querySelectorAll<HTMLElement>("button")).find(
-      (b) => (b.textContent ?? "").trim() === "Submit Review"
-    ) ?? null
-  );
+  return findByText<HTMLElement>("button", "Submit Review");
 }
 
 /** 1:1 of `Pd` — grade one peer item on the review page. */

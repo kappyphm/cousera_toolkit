@@ -4,6 +4,7 @@
 // code -> submit -> confirm dialog -> chain requestGradingByPeer() only when
 // the page discloses "AI Grading" (prototype hD gate).
 import { sleep, waitForSelector } from "../shared/coursera.ts";
+import { findByText } from "../shared/finder.ts";
 import { generateRandomWords } from "../shared/random.ts";
 import { createLogger } from "../shared/logger.ts";
 import { fillEditor, fillPlainInput } from "./editor-fill.ts";
@@ -13,6 +14,16 @@ const log = createLogger("auto-submit-assignment");
 
 /** 1:1 of prototype `hD` @ 734205 — true when page discloses AI Grading. */
 export async function hasAiGrading(): Promise<boolean> {
+  // Current-UI primary signal (issue #32, deliberate deviation from
+  // the prototype's sole check): the "Switch to peer grading" button
+  // renders ONLY on an AI-graded submission view (observed live
+  // 2026-10-31), so its presence is a certain positive. Pre-submission
+  // pages don't render it, in which case the prototype's own check
+  // below decides exactly as before.
+  if (findByText("button", "Switch to peer grading")) {
+    log.debug("hD", "AI Grading detected via Switch-to-peer-grading button");
+    return true;
+  }
   const el = await waitForSelector(".disclosure-header", 1000).catch(() => null);
   const hit = el?.textContent?.includes("AI Grading") ?? false;
   log.debug("hD", `AI Grading disclosure=${hit}`);
